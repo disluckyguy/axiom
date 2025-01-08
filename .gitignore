@@ -1,0 +1,4 @@
+.fleet
+.vscode
+.zig-cache
+zig-out
