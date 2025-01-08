@@ -167,7 +167,7 @@ pub const XwaylandOverrideRedirect = struct {
 
         xwaylandOverrideRedirect.surface_tree.?.node.data = @intFromPtr(xwaylandOverrideRedirect);
 
-        xwaylandOverrideRedirect.server.focusOverrideRedirect(xwaylandOverrideRedirect);
+        xwaylandOverrideRedirect.server.seat.focusOverrideRedirect(xwaylandOverrideRedirect);
     }
 
     pub fn unmap(listener: *wl.Listener(void)) void {

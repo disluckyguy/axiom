@@ -38,14 +38,14 @@ pub const Keyboard = struct {
         wlr_keyboard.events.modifiers.add(&keyboard.modifiers);
         wlr_keyboard.events.key.add(&keyboard.key);
 
-        server.seat.setKeyboard(wlr_keyboard);
-        server.keyboards.append(keyboard);
+        server.seat.seat.setKeyboard(wlr_keyboard);
+        server.seat.keyboards.append(keyboard);
     }
 
     pub fn modifiers(listener: *wl.Listener(*wlr.Keyboard), wlr_keyboard: *wlr.Keyboard) void {
         const keyboard: *Keyboard = @fieldParentPtr("modifiers", listener);
-        keyboard.server.seat.setKeyboard(wlr_keyboard);
-        keyboard.server.seat.keyboardNotifyModifiers(&wlr_keyboard.modifiers);
+        keyboard.server.seat.seat.setKeyboard(wlr_keyboard);
+        keyboard.server.seat.seat.keyboardNotifyModifiers(&wlr_keyboard.modifiers);
     }
 
     pub fn key(listener: *wl.Listener(*wlr.Keyboard.event.Key), event: *wlr.Keyboard.event.Key) void {
@@ -59,7 +59,7 @@ pub const Keyboard = struct {
 
         if (wlr_keyboard.getModifiers().shift and event.state == .pressed) {
             for (wlr_keyboard.xkb_state.?.keyGetSyms(keycode)) |sym| {
-                if (keyboard.server.handleKeybind(sym)) {
+                if (keyboard.server.seat.handleKeybind(sym)) {
                     handled = true;
                     break;
                 }
@@ -67,8 +67,8 @@ pub const Keyboard = struct {
         }
 
         if (!handled) {
-            keyboard.server.seat.setKeyboard(wlr_keyboard);
-            keyboard.server.seat.keyboardNotifyKey(event.time_msec, event.keycode, event.state);
+            keyboard.server.seat.seat.setKeyboard(wlr_keyboard);
+            keyboard.server.seat.seat.keyboardNotifyKey(event.time_msec, event.keycode, event.state);
         }
     }
 };

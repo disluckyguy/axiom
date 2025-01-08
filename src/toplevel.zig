@@ -59,7 +59,7 @@ pub const Toplevel = struct {
 
     pub fn map(listener: *wl.Listener(void)) void {
         const toplevel: *Toplevel = @fieldParentPtr("map", listener);
-        toplevel.view.server.focusView(toplevel.view, toplevel.xdg_toplevel.base.surface);
+        toplevel.view.server.seat.focusView(toplevel.view, toplevel.xdg_toplevel.base.surface);
     }
 
     pub fn unmap(listener: *wl.Listener(void)) void {
@@ -94,11 +94,11 @@ pub const Toplevel = struct {
     ) void {
         const toplevel: *Toplevel = @fieldParentPtr("request_move", listener);
 
-        const server = toplevel.view.server;
-        server.grabbed_view = toplevel.view;
-        server.cursor_mode = .move;
-        server.grab_x = server.cursor.x - @as(f64, @floatFromInt(toplevel.view.box.x));
-        server.grab_y = server.cursor.y - @as(f64, @floatFromInt(toplevel.view.box.y));
+        const seat = toplevel.view.server.seat;
+        seat.grabbed_view = toplevel.view;
+        seat.cursor.cursor_mode = .move;
+        seat.grab_x = seat.cursor.cursor.x - @as(f64, @floatFromInt(toplevel.view.box.x));
+        seat.grab_y = seat.cursor.cursor.y - @as(f64, @floatFromInt(toplevel.view.box.y));
         toplevel.destroyPopups();
     }
 
@@ -107,22 +107,22 @@ pub const Toplevel = struct {
         event: *wlr.XdgToplevel.event.Resize,
     ) void {
         const toplevel: *Toplevel = @fieldParentPtr("request_resize", listener);
-        const server = toplevel.view.server;
+        const seat = toplevel.view.server.seat;
 
-        server.grabbed_view = toplevel.view;
-        server.cursor_mode = .resize;
-        server.resize_edges = event.edges;
+        seat.grabbed_view = toplevel.view;
+        seat.cursor.cursor_mode = .resize;
+        seat.resize_edges = event.edges;
 
         var box: wlr.Box = undefined;
         toplevel.xdg_toplevel.base.getGeometry(&box);
 
         const border_x = toplevel.view.box.x + box.x + if (event.edges.right) box.width else 0;
         const border_y = toplevel.view.box.y + box.y + if (event.edges.bottom) box.height else 0;
-        server.grab_x = server.cursor.x - @as(f64, @floatFromInt(border_x));
-        server.grab_y = server.cursor.y - @as(f64, @floatFromInt(border_y));
+        seat.grab_x = seat.cursor.cursor.x - @as(f64, @floatFromInt(border_x));
+        seat.grab_y = seat.cursor.cursor.y - @as(f64, @floatFromInt(border_y));
 
-        server.grab_box = box;
-        server.grab_box.x += toplevel.view.box.x;
-        server.grab_box.y += toplevel.view.box.y;
+        seat.grab_box = box;
+        seat.grab_box.x += toplevel.view.box.x;
+        seat.grab_box.y += toplevel.view.box.y;
     }
 };

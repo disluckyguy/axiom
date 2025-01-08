@@ -14,6 +14,7 @@ const axiom_keyboard = @import("keyboard.zig");
 const axiom_output = @import("output.zig");
 const axiom_popup = @import("popup.zig");
 const axiom_view = @import("view.zig");
+const axiom_seat = @import("seat.zig");
 const gpa = @import("utils.zig").gpa;
 
 pub const Server = struct {
@@ -23,11 +24,13 @@ pub const Server = struct {
     allocator: *wlr.Allocator,
     scene: *wlr.Scene,
     compositor: *wlr.Compositor,
-    //socket: []const u8,
 
     output_layout: *wlr.OutputLayout,
     scene_output_layout: *wlr.SceneOutputLayout,
     new_output: wl.Listener(*wlr.Output) = wl.Listener(*wlr.Output).init(newOutput),
+
+    seat: *axiom_seat.Seat,
+    new_input: wl.Listener(*wlr.InputDevice) = wl.Listener(*wlr.InputDevice).init(newInput),
 
     xdg_shell: *wlr.XdgShell,
     new_xdg_toplevel: wl.Listener(*wlr.XdgToplevel) = wl.Listener(*wlr.XdgToplevel).init(newXdgToplevel),
@@ -37,27 +40,6 @@ pub const Server = struct {
     xwayland_ready: wl.Listener(void) = wl.Listener(void).init(xwaylandReady),
     new_xwayland_surface: wl.Listener(*wlr.XwaylandSurface) = wl.Listener(*wlr.XwaylandSurface).init(newXwaylandSurface),
     override_redirect_tree: *wlr.SceneTree,
-
-    seat: *wlr.Seat,
-    new_input: wl.Listener(*wlr.InputDevice) = wl.Listener(*wlr.InputDevice).init(newInput),
-    request_set_cursor: wl.Listener(*wlr.Seat.event.RequestSetCursor) = wl.Listener(*wlr.Seat.event.RequestSetCursor).init(requestSetCursor),
-    request_set_selection: wl.Listener(*wlr.Seat.event.RequestSetSelection) = wl.Listener(*wlr.Seat.event.RequestSetSelection).init(requestSetSelection),
-    keyboards: wl.list.Head(axiom_keyboard.Keyboard, .link) = undefined,
-
-    cursor: *wlr.Cursor,
-    cursor_mgr: *wlr.XcursorManager,
-    cursor_motion: wl.Listener(*wlr.Pointer.event.Motion) = wl.Listener(*wlr.Pointer.event.Motion).init(cursorMotion),
-    cursor_motion_absolute: wl.Listener(*wlr.Pointer.event.MotionAbsolute) = wl.Listener(*wlr.Pointer.event.MotionAbsolute).init(cursorMotionAbsolute),
-    cursor_button: wl.Listener(*wlr.Pointer.event.Button) = wl.Listener(*wlr.Pointer.event.Button).init(cursorButton),
-    cursor_axis: wl.Listener(*wlr.Pointer.event.Axis) = wl.Listener(*wlr.Pointer.event.Axis).init(cursorAxis),
-    cursor_frame: wl.Listener(*wlr.Cursor) = wl.Listener(*wlr.Cursor).init(cursorFrame),
-
-    cursor_mode: enum { passthrough, move, resize } = .passthrough,
-    grabbed_view: ?*axiom_view.View = null,
-    grab_x: f64 = 0,
-    grab_y: f64 = 0,
-    grab_box: wlr.Box = undefined,
-    resize_edges: wlr.Edges = .{},
 
     pub fn start(server: Server) !void {
         var buf: [11]u8 = undefined;
@@ -78,7 +60,6 @@ pub const Server = struct {
         const scene = try wlr.Scene.create();
 
         server.* = .{
-            //.socket = undefined,
             .wl_server = wl_server,
             .backend = backend,
             .renderer = renderer,
@@ -88,12 +69,12 @@ pub const Server = struct {
             .output_layout = output_layout,
             .scene_output_layout = try scene.attachOutputLayout(output_layout),
             .xdg_shell = try wlr.XdgShell.create(wl_server, 2),
-            .seat = try wlr.Seat.create(wl_server, "default"),
+            .seat = undefined,
             .xwayland = undefined,
             .override_redirect_tree = try scene.tree.createSceneTree(),
-            .cursor = try wlr.Cursor.create(),
-            .cursor_mgr = try wlr.XcursorManager.create(null, 24),
         };
+
+        server.seat = try axiom_seat.Seat.create(server);
 
         try server.renderer.initServer(wl_server);
 
@@ -101,7 +82,7 @@ pub const Server = struct {
         _ = try wlr.Subcompositor.create(server.wl_server);
         _ = try wlr.DataDeviceManager.create(server.wl_server);
         server.xwayland = try wlr.Xwayland.create(wl_server, server.compositor, false);
-        server.xwayland.setSeat(server.seat);
+        server.xwayland.setSeat(server.seat.seat);
         server.xwayland.events.ready.add(&server.xwayland_ready);
         server.backend.events.new_output.add(&server.new_output);
 
@@ -119,17 +100,6 @@ pub const Server = struct {
         try env_map.put("DISPLAY", std.mem.span(server.xwayland.display_name));
 
         server.backend.events.new_input.add(&server.new_input);
-        server.seat.events.request_set_cursor.add(&server.request_set_cursor);
-        server.seat.events.request_set_selection.add(&server.request_set_selection);
-        server.keyboards.init();
-
-        server.cursor.attachOutputLayout(server.output_layout);
-        try server.cursor_mgr.load(1);
-        server.cursor.events.motion.add(&server.cursor_motion);
-        server.cursor.events.motion_absolute.add(&server.cursor_motion_absolute);
-        server.cursor.events.button.add(&server.cursor_button);
-        server.cursor.events.axis.add(&server.cursor_axis);
-        server.cursor.events.frame.add(&server.cursor_frame);
     }
 
     pub fn deinit(server: *Server) void {
@@ -157,6 +127,23 @@ pub const Server = struct {
             wlr_output.destroy();
             return;
         };
+    }
+
+    pub fn newInput(listener: *wl.Listener(*wlr.InputDevice), device: *wlr.InputDevice) void {
+        const server: *Server = @fieldParentPtr("new_input", listener);
+        switch (device.type) {
+            .keyboard => axiom_keyboard.Keyboard.create(server, device) catch |err| {
+                std.log.err("failed to create keyboard: {}", .{err});
+                return;
+            },
+            .pointer => server.seat.cursor.cursor.attachInputDevice(device),
+            else => {},
+        }
+
+        server.seat.seat.setCapabilities(.{
+            .pointer = true,
+            .keyboard = server.seat.keyboards.length() > 0,
+        });
     }
 
     pub fn newXdgToplevel(listener: *wl.Listener(*wlr.XdgToplevel), xdg_toplevel: *wlr.XdgToplevel) void {
@@ -205,12 +192,12 @@ pub const Server = struct {
     pub fn xwaylandReady(listener: *wl.Listener(void)) void {
         const server: *Server = @fieldParentPtr("xwayland_ready", listener);
         const xwayland = server.xwayland;
-        const xcursor: *wlr.Xcursor = server.cursor_mgr.getXcursor("default", 1.0) orelse {
+        const xcursor: *wlr.Xcursor = server.seat.cursor.cursor_mgr.getXcursor("default", 1.0) orelse {
             std.log.err("couldn't get Xcursor", .{});
             return;
         };
 
-        xwayland.setSeat(server.seat);
+        xwayland.setSeat(server.seat.seat);
         xwayland.setCursor(
             xcursor.images[0].buffer,
             xcursor.images[0].width * 4,
@@ -333,264 +320,5 @@ pub const Server = struct {
             }
         }
         return null;
-    }
-
-    pub fn focusView(server: *Server, view: *axiom_view.View, surface: *wlr.Surface) void {
-        if (server.seat.keyboard_state.focused_surface) |previous_surface| {
-            if (previous_surface == surface) return;
-            if (wlr.XdgSurface.tryFromWlrSurface(previous_surface)) |xdg_surface| {
-                _ = xdg_surface.role_data.toplevel.?.setActivated(false);
-            } else if (wlr.XwaylandSurface.tryFromWlrSurface(previous_surface)) |xwayland_surface| {
-                _ = xwayland_surface.activate(false);
-            }
-        }
-
-        view.scene_tree.node.raiseToTop();
-        view.link.remove();
-        server.views.prepend(view);
-
-        switch (view.impl) {
-            .xwayland_surface => |xwayland_view| {
-                xwayland_view.surface.activate(true);
-            },
-            .toplevel => |toplevel| {
-                _ = toplevel.xdg_toplevel.setActivated(true);
-            },
-            .none => {},
-        }
-
-        const wlr_keyboard = server.seat.getKeyboard() orelse return;
-        server.seat.keyboardNotifyEnter(
-            surface,
-            wlr_keyboard.keycodes[0..wlr_keyboard.num_keycodes],
-            &wlr_keyboard.modifiers,
-        );
-    }
-
-    pub fn focusOverrideRedirect(server: *Server, override_redirect: *axiom_xwayland.XwaylandOverrideRedirect) void {
-        std.log.info("focusing", .{});
-
-        const surface = override_redirect.surface.surface orelse return;
-
-        const surface_tree = override_redirect.surface_tree orelse return;
-        surface_tree.node.raiseToTop();
-
-        std.log.info("surface present", .{});
-
-        server.override_redirect_tree.node.raiseToTop();
-
-        const wlr_keyboard = server.seat.getKeyboard() orelse return;
-
-        std.log.info("keyboard present", .{});
-        server.seat.keyboardNotifyEnter(
-            surface,
-            wlr_keyboard.keycodes[0..wlr_keyboard.num_keycodes],
-            &wlr_keyboard.modifiers,
-        );
-    }
-
-    pub fn newInput(listener: *wl.Listener(*wlr.InputDevice), device: *wlr.InputDevice) void {
-        const server: *Server = @fieldParentPtr("new_input", listener);
-        switch (device.type) {
-            .keyboard => axiom_keyboard.Keyboard.create(server, device) catch |err| {
-                std.log.err("failed to create keyboard: {}", .{err});
-                return;
-            },
-            .pointer => server.cursor.attachInputDevice(device),
-            else => {},
-        }
-
-        server.seat.setCapabilities(.{
-            .pointer = true,
-            .keyboard = server.keyboards.length() > 0,
-        });
-    }
-
-    pub fn requestSetCursor(
-        listener: *wl.Listener(*wlr.Seat.event.RequestSetCursor),
-        event: *wlr.Seat.event.RequestSetCursor,
-    ) void {
-        const server: *Server = @fieldParentPtr("request_set_cursor", listener);
-        if (event.seat_client == server.seat.pointer_state.focused_client)
-            server.cursor.setSurface(event.surface, event.hotspot_x, event.hotspot_y);
-    }
-
-    pub fn requestSetSelection(
-        listener: *wl.Listener(*wlr.Seat.event.RequestSetSelection),
-        event: *wlr.Seat.event.RequestSetSelection,
-    ) void {
-        const server: *Server = @fieldParentPtr("request_set_selection", listener);
-        server.seat.setSelection(event.source, event.serial);
-    }
-
-    pub fn cursorMotion(
-        listener: *wl.Listener(*wlr.Pointer.event.Motion),
-        event: *wlr.Pointer.event.Motion,
-    ) void {
-        const server: *Server = @fieldParentPtr("cursor_motion", listener);
-        server.cursor.move(event.device, event.delta_x, event.delta_y);
-        server.processCursorMotion(event.time_msec);
-    }
-
-    pub fn cursorMotionAbsolute(
-        listener: *wl.Listener(*wlr.Pointer.event.MotionAbsolute),
-        event: *wlr.Pointer.event.MotionAbsolute,
-    ) void {
-        const server: *Server = @fieldParentPtr("cursor_motion_absolute", listener);
-        server.cursor.warpAbsolute(event.device, event.x, event.y);
-        server.processCursorMotion(event.time_msec);
-    }
-
-    pub fn processCursorMotion(server: *Server, time_msec: u32) void {
-        switch (server.cursor_mode) {
-            .passthrough => if (server.viewAt(server.cursor.x, server.cursor.y)) |res| {
-                server.seat.pointerNotifyEnter(res.surface, res.sx, res.sy);
-                server.seat.pointerNotifyMotion(time_msec, res.sx, res.sy);
-            } else if (server.overrideRedirectAt(server.cursor.x, server.cursor.y)) |res| {
-                server.seat.pointerNotifyEnter(res.surface, res.sx, res.sy);
-                server.seat.pointerNotifyMotion(time_msec, res.sx, res.sy);
-            } else {
-                server.cursor.setXcursor(server.cursor_mgr, "default");
-                server.seat.pointerClearFocus();
-            },
-            .move => {
-                const view = server.grabbed_view.?;
-                view.box.x = @as(i32, @intFromFloat(server.cursor.x - server.grab_x));
-                view.box.y = @as(i32, @intFromFloat(server.cursor.y - server.grab_y));
-                view.scene_tree.node.setPosition(view.box.x, view.box.y);
-            },
-            .resize => {
-                const view = server.grabbed_view.?;
-                const border_x = @as(i32, @intFromFloat(server.cursor.x - server.grab_x));
-                const border_y = @as(i32, @intFromFloat(server.cursor.y - server.grab_y));
-
-                var new_left = server.grab_box.x;
-                var new_right = server.grab_box.x + server.grab_box.width;
-                var new_top = server.grab_box.y;
-                var new_bottom = server.grab_box.y + server.grab_box.height;
-
-                if (server.resize_edges.top) {
-                    new_top = border_y;
-                    if (new_top >= new_bottom)
-                        new_top = new_bottom - 1;
-                } else if (server.resize_edges.bottom) {
-                    new_bottom = border_y;
-                    if (new_bottom <= new_top)
-                        new_bottom = new_top + 1;
-                }
-
-                if (server.resize_edges.left) {
-                    new_left = border_x;
-                    if (new_left >= new_right)
-                        new_left = new_right - 1;
-                } else if (server.resize_edges.right) {
-                    new_right = border_x;
-                    if (new_right <= new_left)
-                        new_right = new_left + 1;
-                }
-
-                const new_width = new_right - new_left;
-                const new_height = new_bottom - new_top;
-
-                switch (view.impl) {
-                    .xwayland_surface => |xwayland_view| {
-                        const xwayland_surface = xwayland_view.surface;
-                        xwayland_view.view.box.x = new_left - xwayland_surface.x;
-                        xwayland_view.view.box.y = new_top - xwayland_surface.y;
-                        xwayland_view.view.scene_tree.node.setPosition(xwayland_surface.x, xwayland_surface.y);
-
-                        _ = xwayland_surface.configure(
-                            xwayland_surface.x,
-                            xwayland_surface.y,
-                            @intCast(new_width),
-                            @intCast(new_height),
-                        );
-                    },
-                    .toplevel => |toplevel| {
-                        var geo_box: wlr.Box = undefined;
-                        _ = toplevel.xdg_toplevel.base.getGeometry(&geo_box);
-                        toplevel.view.box.x = new_left - geo_box.x;
-                        toplevel.view.box.y = new_top - geo_box.y;
-                        toplevel.view.scene_tree.node.setPosition(toplevel.view.box.x, toplevel.view.box.y);
-                        _ = toplevel.xdg_toplevel.setSize(new_width, new_height);
-                    },
-                    .none => {},
-                }
-            },
-        }
-    }
-
-    pub fn cursorButton(
-        listener: *wl.Listener(*wlr.Pointer.event.Button),
-        event: *wlr.Pointer.event.Button,
-    ) void {
-        const server: *Server = @fieldParentPtr("cursor_button", listener);
-        _ = server.seat.pointerNotifyButton(event.time_msec, event.button, event.state);
-        if (event.state == .released) {
-            server.cursor_mode = .passthrough;
-        } else if (server.viewAt(server.cursor.x, server.cursor.y)) |res| {
-            server.focusView(res.view, res.surface);
-        } else if (server.overrideRedirectAt(server.cursor.x, server.cursor.y)) |res| {
-            server.focusOverrideRedirect(res.override_redirect);
-        }
-    }
-
-    pub fn cursorAxis(
-        listener: *wl.Listener(*wlr.Pointer.event.Axis),
-        event: *wlr.Pointer.event.Axis,
-    ) void {
-        const server: *Server = @fieldParentPtr("cursor_axis", listener);
-        server.seat.pointerNotifyAxis(
-            event.time_msec,
-            event.orientation,
-            event.delta,
-            event.delta_discrete,
-            event.source,
-            event.relative_direction,
-        );
-    }
-
-    pub fn cursorFrame(listener: *wl.Listener(*wlr.Cursor), _: *wlr.Cursor) void {
-        const server: *Server = @fieldParentPtr("cursor_frame", listener);
-        server.seat.pointerNotifyFrame();
-    }
-
-    /// Assumes the modifier used for compositor keybinds is pressed
-    /// Returns true if the key was handled
-    pub fn handleKeybind(server: *Server, key: xkb.Keysym) bool {
-        switch (@intFromEnum(key)) {
-            // Exit the compositor
-            xkb.Keysym.Escape => {
-                server.wl_server.terminate();
-            },
-            // Focus the next toplevel in the stack, pushing the current top to the back
-            xkb.Keysym.F1 => {
-                if (server.views.length() < 2) return true;
-                if (server.views.link.prev) |prev| {
-                    const view: *axiom_view.View = @fieldParentPtr("link", prev);
-                    const surface = view.rootSurface() orelse return false;
-                    std.log.info("focusing surface", .{});
-                    server.focusView(view, surface);
-                }
-            },
-
-            xkb.Keysym.F2 => {
-                var env_map = std.process.getEnvMap(gpa) catch return false;
-                defer env_map.deinit();
-                var process = std.process.Child.init(
-                    &[_][]const u8{"konsole"},
-                    gpa,
-                );
-
-                process.env_map = &env_map;
-
-                process.spawn() catch return false;
-
-                return true;
-            },
-
-            else => return false,
-        }
-        return true;
     }
 };

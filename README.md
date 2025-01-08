@@ -1,2 +1,2 @@
 # Axiom
-# Stacking wlroots based compositor
+## Stacking wlroots based compositor
