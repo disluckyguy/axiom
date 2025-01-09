@@ -131,7 +131,7 @@ pub const Cursor = struct {
                         const xwayland_surface = xwayland_view.surface;
                         xwayland_view.view.box.x = new_left - xwayland_surface.x;
                         xwayland_view.view.box.y = new_top - xwayland_surface.y;
-                        xwayland_view.view.scene_tree.node.setPosition(xwayland_surface.x, xwayland_surface.y);
+                        xwayland_view.view.scene_tree.node.setPosition(view.box.x, view.box.y);
 
                         _ = xwayland_surface.configure(
                             xwayland_surface.x,

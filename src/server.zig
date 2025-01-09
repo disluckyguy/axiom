@@ -238,6 +238,8 @@ pub const Server = struct {
             xwayland_surface.events.request_configure.add(&xwayland_view.request_configure);
             xwayland_surface.events.associate.add(&xwayland_view.associate);
             xwayland_surface.events.dissociate.add(&xwayland_view.dissociate);
+            xwayland_surface.events.request_move.add(&xwayland_view.request_move);
+            xwayland_surface.events.request_resize.add(&xwayland_view.request_resize);
 
             if (xwayland_surface.surface) |surface| {
                 xwayland_view.surface.surface.?.events.map.add(&xwayland_view.map);

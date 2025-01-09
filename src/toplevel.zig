@@ -46,12 +46,19 @@ pub const Toplevel = struct {
         toplevel.view.popup_tree.node.raiseToTop();
         xdg_surface.data = @intFromPtr(scene_tree);
 
+        scene_tree.node.data = @intFromPtr(toplevel.view.server.output_layout.outputs.first().?);
+
         const popup = gpa.create(axiom_popup.Popup) catch {
             std.log.err("failed to allocate new popup", .{});
             return;
         };
 
-        popup.* = .{ .xdg_popup = xdg_popup, .server = toplevel.view.server, .scene_tree = scene_tree, .root_tree = toplevel.view.scene_tree };
+        popup.* = .{
+            .xdg_popup = xdg_popup,
+            .server = toplevel.view.server,
+            .scene_tree = scene_tree,
+            .root_tree = toplevel.view.scene_tree,
+        };
 
         xdg_surface.surface.events.commit.add(&popup.commit);
         xdg_popup.events.destroy.add(&popup.destroy);

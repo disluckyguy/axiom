@@ -7,6 +7,7 @@ const pixman = @import("pixman");
 
 const wlr = @import("wlroots");
 const axiom_server = @import("server.zig");
+const axiom_view = @import("view.zig");
 const gpa = @import("utils.zig").gpa;
 
 pub const Popup = struct {
@@ -23,6 +24,7 @@ pub const Popup = struct {
     pub fn commit(listener: *wl.Listener(*wlr.Surface), _: *wlr.Surface) void {
         const popup: *Popup = @fieldParentPtr("commit", listener);
         if (popup.xdg_popup.base.initial_commit) {
+            reposition(&popup.reposition);
             _ = popup.xdg_popup.base.scheduleConfigure();
         }
     }
@@ -37,9 +39,10 @@ pub const Popup = struct {
     }
 
     fn reposition(listener: *wl.Listener(void)) void {
+        std.log.info("repositioning", .{});
         const popup: *Popup = @fieldParentPtr("reposition", listener);
-        const output: *wlr.Output = @ptrFromInt(popup.root_tree.node.data);
-
+        const view: *axiom_view.View = @ptrFromInt(popup.root_tree.node.data);
+        const output = view.rootSurface().?.current_outputs.first().?.output;
         var box: wlr.Box = undefined;
         popup.server.output_layout.getBox(output, &box);
 
@@ -47,9 +50,11 @@ pub const Popup = struct {
         var root_ly: c_int = undefined;
         _ = popup.root_tree.node.coords(&root_lx, &root_ly);
 
+        std.log.info("{}", .{popup.scene_tree.node.x});
+
         box.x -= root_lx;
         box.y -= root_ly;
 
-        popup.xdg_popup.unconstrainFromBox(&box);
+        std.log.info("{}", .{box.y});
     }
 };

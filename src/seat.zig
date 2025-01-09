@@ -92,21 +92,16 @@ pub const Seat = struct {
     }
 
     pub fn focusOverrideRedirect(seat: *Seat, override_redirect: *axiom_xwayland.XwaylandOverrideRedirect) void {
-        std.log.info("focusing", .{});
-
         const server = seat.server;
         const surface = override_redirect.surface.surface orelse return;
 
         const surface_tree = override_redirect.surface_tree orelse return;
         surface_tree.node.raiseToTop();
 
-        std.log.info("surface present", .{});
-
         server.override_redirect_tree.node.raiseToTop();
 
         const wlr_keyboard = server.seat.seat.getKeyboard() orelse return;
 
-        std.log.info("keyboard present", .{});
         server.seat.seat.keyboardNotifyEnter(
             surface,
             wlr_keyboard.keycodes[0..wlr_keyboard.num_keycodes],
