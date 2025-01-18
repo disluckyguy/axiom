@@ -32,6 +32,8 @@ pub const Keyboard = struct {
         defer keymap.unref();
 
         const wlr_keyboard = device.toKeyboard();
+
+        wlr_keyboard.data = @intFromPtr(keyboard);
         if (!wlr_keyboard.setKeymap(keymap)) return error.SetKeymapFailed;
         wlr_keyboard.setRepeatInfo(25, 600);
 

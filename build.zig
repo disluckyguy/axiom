@@ -7,7 +7,10 @@ pub fn build(b: *std.Build) void {
     const optimize = b.standardOptimizeOption(.{});
 
     const scanner = Scanner.create(b, .{});
+
     scanner.addSystemProtocol("stable/xdg-shell/xdg-shell.xml");
+    scanner.addCustomProtocol("protocols/wlr-layer-shell-unstable-v1.xml");
+    scanner.addCustomProtocol("protocols/wlr-output-power-management-unstable-v1.xml");
 
     // Some of these versions may be out of date with what wlroots implements.
     // This is not a problem in practice though as long as axiom successfully compiles.
@@ -31,6 +34,9 @@ pub fn build(b: *std.Build) void {
     wlroots.addImport("xkbcommon", xkbcommon);
     wlroots.addImport("pixman", pixman);
     wlroots.addImport("wlroots", wlroots);
+
+    scanner.generate("zwlr_layer_shell_v1", 4);
+    scanner.generate("zwlr_output_power_manager_v1", 1);
 
     // We need to ensure the wlroots include path obtained from pkg-config is
     // exposed to the wlroots module for @cImport() to work. This seems to be

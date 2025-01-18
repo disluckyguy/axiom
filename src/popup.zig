@@ -8,11 +8,14 @@ const pixman = @import("pixman");
 const wlr = @import("wlroots");
 const axiom_server = @import("server.zig");
 const axiom_view = @import("view.zig");
+const AxiomSceneNodeData = @import("scene_node_data.zig").SceneNodeData;
+const AxiomData = @import("scene_node_data.zig").Data;
 const gpa = @import("utils.zig").gpa;
+
+const server = &@import("main.zig").server;
 
 pub const Popup = struct {
     xdg_popup: *wlr.XdgPopup,
-    server: *axiom_server.Server,
 
     scene_tree: *wlr.SceneTree,
     root_tree: *wlr.SceneTree,
@@ -20,6 +23,25 @@ pub const Popup = struct {
     commit: wl.Listener(*wlr.Surface) = wl.Listener(*wlr.Surface).init(commit),
     destroy: wl.Listener(void) = wl.Listener(void).init(destroy),
     reposition: wl.Listener(void) = wl.Listener(void).init(reposition),
+
+    pub fn create(
+        xdg_popup: *wlr.XdgPopup,
+        root: *wlr.SceneTree,
+        parent: *wlr.SceneTree,
+    ) error{OutOfMemory}!void {
+        const popup = try gpa.create(Popup);
+        errdefer gpa.destroy(popup);
+
+        popup.* = .{
+            .xdg_popup = xdg_popup,
+            .root_tree = root,
+            .scene_tree = try parent.createSceneXdgSurface(xdg_popup.base),
+        };
+
+        xdg_popup.events.destroy.add(&popup.destroy);
+        xdg_popup.base.surface.events.commit.add(&popup.commit);
+        xdg_popup.events.reposition.add(&popup.reposition);
+    }
 
     pub fn commit(listener: *wl.Listener(*wlr.Surface), _: *wlr.Surface) void {
         const popup: *Popup = @fieldParentPtr("commit", listener);
@@ -41,10 +63,13 @@ pub const Popup = struct {
     fn reposition(listener: *wl.Listener(void)) void {
         std.log.info("repositioning", .{});
         const popup: *Popup = @fieldParentPtr("reposition", listener);
-        const view: *axiom_view.View = @ptrFromInt(popup.root_tree.node.data);
+        const node_data: *AxiomSceneNodeData = @ptrFromInt(popup.root_tree.node.data);
+        const view = node_data.data.view;
+
+        std.log.info("View: {}", .{view});
         const output = view.rootSurface().?.current_outputs.first().?.output;
         var box: wlr.Box = undefined;
-        popup.server.output_layout.getBox(output, &box);
+        server.root.output_layout.getBox(output, &box);
 
         var root_lx: c_int = undefined;
         var root_ly: c_int = undefined;

@@ -10,10 +10,11 @@ const wlr = @import("wlroots");
 const axiom_server = @import("server.zig");
 const gpa = @import("utils.zig").gpa;
 
+pub var server: axiom_server.Server = undefined;
+
 pub fn main() anyerror!void {
     wlr.log.init(.debug, null);
 
-    var server: axiom_server.Server = undefined;
     try server.init();
     defer server.deinit();
 

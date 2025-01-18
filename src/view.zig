@@ -1,18 +1,26 @@
+const build_options = @import("build_options");
 const std = @import("std");
-const posix = std.posix;
+const assert = std.debug.assert;
 const math = std.math;
-
-const wl = @import("wayland").server.wl;
-const xkb = @import("xkbcommon");
-const c = @import("c.zig");
-const pixman = @import("pixman");
-
+const posix = std.posix;
 const wlr = @import("wlroots");
+const wl = @import("wayland").server.wl;
+//const wp = @import("wayland").server.wp;
 
-const axiom_server = @import("server.zig");
+const server = &@import("main.zig").server;
+const gpa = @import("utils.zig").gpa;
+
+//const ForeignToplevelHandle = @import("ForeignToplevelHandle.zig");
 const axiom_toplevel = @import("toplevel.zig");
 const axiom_xwayland = @import("xwayland.zig");
-const gpa = @import("utils.zig").gpa;
+const axiom_keyboard = @import("keyboard.zig");
+const axiom_output = @import("output.zig");
+const axiom_popup = @import("popup.zig");
+const axiom_root = @import("root.zig");
+const axiom_seat = @import("seat.zig");
+const axiom_cursor = @import("cursor.zig");
+const AxiomSceneNodeData = @import("scene_node_data.zig").SceneNodeData;
+const AxiomData = @import("scene_node_data.zig").Data;
 
 pub const Constraints = struct {
     min_width: u31 = 1,
@@ -21,86 +29,505 @@ pub const Constraints = struct {
     max_height: u31 = math.maxInt(u31),
 };
 
-pub const Impl = union(enum) {
-    xwayland_surface: axiom_xwayland.XwaylandView,
+const Impl = union(enum) {
     toplevel: axiom_toplevel.Toplevel,
+    xwayland_view: axiom_xwayland.XwaylandView,
+    /// This state is assigned during destruction after the xdg toplevel
+    /// has been destroyed but while the transaction system is still rendering
+    /// saved surfaces of the view.
+    /// The toplevel could simply be set to undefined instead, but using a
+    /// tag like this gives us better safety checks.
     none,
 };
-pub const View = struct {
-    server: *axiom_server.Server,
-    impl: Impl,
-    link: wl.list.Link,
 
-    scene_tree: *wlr.SceneTree,
-    surface_tree: *wlr.SceneTree,
-    popup_tree: *wlr.SceneTree,
+const AttachRelativeMode = enum {
+    above,
+    below,
+};
 
-    output: ?*wlr.Output = null,
+const TearingMode = enum {
+    no_tearing,
+    tearing,
+    window_hint,
+};
 
-    constraints: Constraints = .{},
+pub const ViewState = struct {
+    /// The output the view is currently assigned to.
+    /// May be null if there are no outputs or for newly created views.
+    /// Must be set using setPendingOutput()
+    output: ?*axiom_output.Output = null,
+
+    /// The output-relative coordinates of the view and dimensions requested by river.
     box: wlr.Box = .{ .x = 0, .y = 0, .width = 0, .height = 0 },
 
+    /// The tags of the view, as a bitmask
+    tags: u32 = 0,
+
+    /// Number of seats currently focusing the view
     focus: u32 = 0,
 
+    float: bool = true,
     fullscreen: bool = false,
+    urgent: bool = false,
+    //ssd: bool = false,
     resizing: bool = false,
 
-    pub fn move(view: *View, delta_x: i32, delta_y: i32) void {
-        view.box.x += delta_x;
-        view.box.x = @max(view.box.x, 0);
+    /// Modify the x/y of the given state by delta_x/delta_y, clamping to the
+    /// bounds of the output.
+    pub fn move(state: *ViewState, delta_x: i32, delta_y: i32) void {
+        const border_width = 5;
 
-        view.box.y += delta_y;
-        view.box.y = @max(view.box.y, 0);
+        var output_width: i32 = math.maxInt(i32);
+        var output_height: i32 = math.maxInt(i32);
+        if (state.output) |output| {
+            output.wlr_output.effectiveResolution(&output_width, &output_height);
+        }
+
+        const max_x = output_width - state.box.width - border_width + @divFloor(state.box.width, 2);
+        state.box.x += delta_x;
+        //state.box.x = @max(state.box.x, border_width);
+        state.box.x = @min(state.box.x, max_x);
+        state.box.x = @max(state.box.x, 0 - @divFloor(state.box.width, 2));
+
+        const max_y = output_height - state.box.height - border_width + @divFloor(state.box.height, 2);
+        state.box.y += delta_y;
+        state.box.y = @max(state.box.y, border_width);
+        state.box.y = @min(state.box.y, max_y);
+        state.box.y = @max(state.box.y, 0);
     }
 
-    pub fn create(impl: Impl, server: *axiom_server.Server) error{OutOfMemory}!*View {
-        std.debug.assert(impl != .none);
+    pub fn clampToOutput(state: *ViewState) void {
+        const output = state.output orelse return;
+
+        var output_width: i32 = undefined;
+        var output_height: i32 = undefined;
+        output.wlr_output.effectiveResolution(&output_width, &output_height);
+
+        const border_width = 5;
+        state.box.width = @min(state.box.width, output_width - (2 * border_width));
+        state.box.height = @min(state.box.height, output_height - (2 * border_width));
+
+        state.move(0, 0);
+    }
+};
+
+pub const View = struct {
+    /// The implementation of this view
+    impl: Impl,
+
+    /// Link for Root.views
+    link: wl.list.Link,
+
+    tree: *wlr.SceneTree,
+    surface_tree: *wlr.SceneTree,
+    saved_surface_tree: *wlr.SceneTree,
+    /// Order is left, right, top, bottom
+    borders: [4]*wlr.SceneRect,
+    border_color: [4]f32 = .{ 255, 0, 0, 1 },
+    popup_tree: *wlr.SceneTree,
+
+    /// Bounds on the width/height of the view, set by the toplevel/xwayland_view implementation.
+    constraints: Constraints = .{},
+
+    mapped: bool = false,
+    /// This is true if the View is involved in the currently inflight transaction.
+    inflight_transaction: bool = false,
+    /// This indicates that the view should be destroyed when the current
+    /// transaction completes. See View.destroy()
+    destroying: bool = false,
+
+    /// The state of the view that is directly acted upon/modified through user input.
+    ///
+    /// Pending state will be copied to the inflight state and communicated to clients
+    /// to be applied as a single atomic transaction across all clients as soon as any
+    /// in progress transaction has been completed.
+    ///
+    /// Any time pending state is modified Root.applyPending() must be called
+    /// before yielding back to the event loop.
+    pending: ViewState = .{},
+    pending_focus_stack_link: wl.list.Link,
+    //pending_wm_stack_link: wl.list.Link,
+
+    /// The state most recently sent to the layout generator and clients.
+    /// This state is immutable until all clients have replied and the transaction
+    /// is completed, at which point this inflight state is copied to current.
+    inflight: ViewState = .{},
+    inflight_focus_stack_link: wl.list.Link,
+    //inflight_wm_stack_link: wl.list.Link,
+
+    /// The current state represented by the scene graph.
+    current: ViewState = .{},
+
+    /// The floating dimensions the view, saved so that they can be restored if the
+    /// view returns to floating mode.
+    float_box: wlr.Box = undefined,
+
+    /// This state exists purely to allow for more intuitive behavior when
+    /// exiting fullscreen if there is no active layout.
+    post_fullscreen_box: wlr.Box = undefined,
+
+    //foreign_toplevel_handle: ForeignToplevelHandle = .{},
+
+    /// Connector name of the output this view occupied before an evacuation.
+    output_before_evac: ?[]const u8 = null,
+
+    tearing_mode: TearingMode = .window_hint,
+
+    pub fn create(impl: Impl) error{OutOfMemory}!*View {
+        assert(impl != .none);
+
         const view = try gpa.create(View);
         errdefer gpa.destroy(view);
 
-        const tree = try server.scene.tree.createSceneTree();
+        const tree = try server.root.transaction.hidden.tree.createSceneTree();
         errdefer tree.node.destroy();
-
-        const popup_tree = try server.scene.tree.createSceneTree();
+        const popup_tree = try server.root.transaction.hidden.tree.createSceneTree();
         errdefer popup_tree.node.destroy();
 
+        //const border_color = .{ 255, 0, 0, 0 };
         view.* = .{
-            .server = server,
             .impl = impl,
             .link = undefined,
-            .scene_tree = tree,
+            .tree = tree,
             .surface_tree = try tree.createSceneTree(),
+            .saved_surface_tree = try tree.createSceneTree(),
+            .borders = .{
+                try tree.createSceneRect(0, 0, &view.border_color),
+                try tree.createSceneRect(0, 0, &view.border_color),
+                try tree.createSceneRect(0, 0, &view.border_color),
+                try tree.createSceneRect(0, 0, &view.border_color),
+            },
             .popup_tree = popup_tree,
+
+            //.pending_wm_stack_link = undefined,
+            .pending_focus_stack_link = undefined,
+            //.inflight_wm_stack_link = undefined,
+            .inflight_focus_stack_link = undefined,
         };
 
-        server.views.prepend(view);
+        server.root.views.prepend(view);
+        server.root.transaction.hidden.pending.focus_stack.prepend(view);
+        //server.root.transaction.hidden.pending.wm_stack.prepend(view);
+        server.root.transaction.hidden.inflight.focus_stack.prepend(view);
+        //server.root.transaction.hidden.inflight.wm_stack.prepend(view);
 
-        view.scene_tree.node.setEnabled(true);
-        view.scene_tree.node.data = @intFromPtr(view);
+        view.tree.node.setEnabled(false);
+        view.popup_tree.node.setEnabled(false);
+        view.saved_surface_tree.node.setEnabled(false);
 
-        view.popup_tree.node.setEnabled(true);
-        view.popup_tree.node.data = @intFromPtr(view);
+        try AxiomSceneNodeData.attach(&view.tree.node, .{ .view = view });
+        try AxiomSceneNodeData.attach(&view.popup_tree.node, .{ .view = view });
+
+        //server.seat.focus(view);
 
         return view;
     }
 
-    pub fn destroy(view: *View) void {
-        std.debug.assert(view.impl != .none);
+    /// If saved buffers of the view are currently in use by a transaction,
+    /// mark this view for destruction when the transaction completes. Otherwise
+    /// destroy immediately.
+    pub fn destroy(view: *View, when: enum { lazy, assert }) void {
+        assert(view.impl == .none);
+        assert(!view.mapped);
 
-        view.surface_tree.node.destroy();
-        view.popup_tree.node.destroy();
+        view.destroying = true;
 
-        view.link.remove();
+        // If there are still saved buffers, then this view needs to be kept
+        // around until the current transaction completes. This function will be
+        // called again in Root.commitTransaction()
+        if (!view.saved_surface_tree.node.enabled) {
+            view.tree.node.destroy();
+            view.popup_tree.node.destroy();
 
-        gpa.destroy(view);
+            view.link.remove();
+            view.pending_focus_stack_link.remove();
+            //view.pending_wm_stack_link.remove();
+            view.inflight_focus_stack_link.remove();
+            //view.inflight_wm_stack_link.remove();
+
+            if (view.output_before_evac) |name| gpa.free(name);
+
+            gpa.destroy(view);
+        } else {
+            switch (when) {
+                .lazy => {},
+                .assert => unreachable,
+            }
+        }
     }
 
+    /// The change in x/y position of the view during resize cannot be determined
+    /// until the size of the buffer actually committed is known. Clients are permitted
+    /// by the protocol to take a size smaller than that requested by the compositor in
+    /// order to maintain an aspect ratio or similar (mpv does this for example).
+    pub fn resizeUpdatePosition(view: *View, width: i32, height: i32) void {
+        assert(view.inflight.resizing);
+
+        const data = blk: {
+            const seat = server.seat;
+            const cursor = seat.cursor;
+            if (cursor.inflight_mode == .resize and cursor.inflight_mode.resize.view == view) {
+                break :blk cursor.inflight_mode.resize;
+            } else {
+                unreachable;
+            }
+        };
+
+        if (data.edges.left) {
+            view.inflight.box.x += view.current.box.width - width;
+            view.pending.box.x = view.inflight.box.x;
+        }
+
+        if (data.edges.top) {
+            view.inflight.box.y += view.current.box.height - height;
+            view.pending.box.y = view.inflight.box.y;
+        }
+    }
+
+    pub fn commitTransaction(view: *View) void {
+        assert(view.inflight_transaction);
+        view.inflight_transaction = false;
+
+        //view.foreign_toplevel_handle.update();
+
+        view.dropSavedSurfaceTree();
+
+        switch (view.impl) {
+            .toplevel => |*toplevel| {
+                switch (toplevel.configure_state) {
+                    .inflight, .acked => {
+                        switch (toplevel.configure_state) {
+                            .inflight => |serial| toplevel.configure_state = .{ .timed_out = serial },
+                            .acked => toplevel.configure_state = .timed_out_acked,
+                            else => unreachable,
+                        }
+
+                        // The transaction has timed out for the xdg toplevel, which means a commit
+                        // in response to the configure with the inflight width/height has not yet
+                        // been made. It may seem that we should therefore leave the current.box
+                        // width/height unchanged. However, this would in fact cause visual glitches.
+                        //
+                        // We must update the dimensions to the current geometry of the
+                        // xdg toplevel here in order to handle the following series of events:
+                        //
+                        // 0. initial state: client has dimensions X
+                        // 1. transaction A sends a configure of size Y
+                        // 2. transaction A times out - saved surfaces are dropped
+                        // 3. transaction B sends a configure of size Z
+                        // 4. client commits buffer of size Y
+                        // 5. transaction B times out - saved surfaces are dropped
+                        //
+                        // If we did not use the current geometry of the toplevel at this point
+                        // we would be rendering the SSD border at initial size X but the surface
+                        // would be rendered at size Y.
+                        if (view.inflight.resizing) {
+                            view.resizeUpdatePosition(toplevel.geometry.width, toplevel.geometry.height);
+                        }
+
+                        view.current = view.inflight;
+                        view.current.box.width = toplevel.geometry.width;
+                        view.current.box.height = toplevel.geometry.height;
+                    },
+                    .idle, .committed => {
+                        toplevel.configure_state = .idle;
+                        view.current = view.inflight;
+                    },
+                    .timed_out, .timed_out_acked => unreachable,
+                }
+            },
+            .xwayland_view => |xwayland_view| {
+                if (view.inflight.resizing) {
+                    view.resizeUpdatePosition(
+                        xwayland_view.xwayland_surface.width,
+                        xwayland_view.xwayland_surface.height,
+                    );
+                }
+
+                view.inflight.box.width = xwayland_view.xwayland_surface.width;
+                view.inflight.box.height = xwayland_view.xwayland_surface.height;
+                view.pending.box.width = xwayland_view.xwayland_surface.width;
+                view.pending.box.height = xwayland_view.xwayland_surface.height;
+
+                view.current = view.inflight;
+            },
+            // This may seem pointless at first glance, but is in fact necessary
+            // to prevent an assertion failure in Root.commitTransaction() as that
+            // function assumes that the inflight tags/output will be applied by
+            // View.commitTransaction() even for views being destroyed.
+            .none => view.current = view.inflight,
+        }
+
+        view.updateSceneState();
+    }
+
+    pub fn updateSceneState(view: *View) void {
+        const box = &view.current.box;
+        view.tree.node.setPosition(box.x, box.y);
+        view.popup_tree.node.setPosition(box.x, box.y);
+
+        var output_box: wlr.Box = .{ .x = 0, .y = 0, .width = 0, .height = 0 };
+        if (view.current.output) |output| {
+            output.wlr_output.effectiveResolution(&output_box.width, &output_box.height);
+        }
+
+        {
+            var surface_clip: wlr.Box = output_box;
+
+            // The clip is applied relative to the root node of the subsurface tree.
+            surface_clip.x -= box.x;
+            surface_clip.y -= box.y;
+
+            switch (view.impl) {
+                .toplevel => |toplevel| {
+                    surface_clip.x += toplevel.geometry.x;
+                    surface_clip.y += toplevel.geometry.y;
+                },
+                .xwayland_view, .none => {},
+            }
+
+            if (!view.surface_tree.children.empty()) {
+                view.surface_tree.node.subsurfaceTreeSetClip(&surface_clip);
+            }
+        }
+
+        {
+            //const config = &server.config;
+            const border_width: c_int = 5;
+            const border_color = blk: {
+                if (view.current.urgent) break :blk view.border_color;
+                if (view.current.focus != 0) break :blk view.border_color;
+                break :blk view.border_color;
+            };
+
+            // Order is left, right, top, bottom
+            // left and right borders include the corners, top and bottom do not.
+            var border_boxes = [4]wlr.Box{
+                .{
+                    .x = -border_width,
+                    .y = -border_width,
+                    .width = border_width,
+                    .height = box.height + 2 * border_width,
+                },
+                .{
+                    .x = box.width,
+                    .y = -border_width,
+                    .width = border_width,
+                    .height = box.height + 2 * border_width,
+                },
+                .{
+                    .x = 0,
+                    .y = -border_width,
+                    .width = box.width,
+                    .height = border_width,
+                },
+                .{
+                    .x = 0,
+                    .y = box.height,
+                    .width = box.width,
+                    .height = border_width,
+                },
+            };
+
+            for (&view.borders, &border_boxes) |border, *border_box| {
+                border_box.x += box.x;
+                border_box.y += box.y;
+                _ = border_box.intersection(border_box, &output_box);
+                border_box.x -= box.x;
+                border_box.y -= box.y;
+
+                border.node.setEnabled(true);
+                border.node.setPosition(border_box.x, border_box.y);
+                border.setSize(border_box.width, border_box.height);
+                border.setColor(&border_color);
+            }
+        }
+    }
+
+    /// Returns true if the configure should be waited for by the transaction system.
+    pub fn configure(view: *View) bool {
+        assert(view.mapped and !view.destroying);
+        switch (view.impl) {
+            .toplevel => |*toplevel| return toplevel.configure(),
+            .xwayland_view => |*xwayland_view| return xwayland_view.configure(),
+            .none => unreachable,
+        }
+    }
+
+    /// Returns null if the view is currently being destroyed and no longer has
+    /// an associated surface.
+    /// May also return null for Xwayland views that are not currently mapped.
     pub fn rootSurface(view: View) ?*wlr.Surface {
         return switch (view.impl) {
-            .toplevel => |toplevel| toplevel.xdg_toplevel.base.surface,
-            .xwayland_surface => |xwayland_view| xwayland_view.surface.surface,
+            .toplevel => |toplevel| toplevel.wlr_toplevel.base.surface,
+            .xwayland_view => |xwayland_view| xwayland_view.xwayland_surface.surface,
             .none => null,
         };
+    }
+
+    pub fn sendFrameDone(view: View) void {
+        assert(view.mapped and !view.destroying);
+
+        var now: posix.timespec = undefined;
+        posix.clock_gettime(posix.CLOCK.MONOTONIC, &now) catch @panic("CLOCK_MONOTONIC not supported");
+        view.rootSurface().?.sendFrameDone(&now);
+    }
+
+    pub fn dropSavedSurfaceTree(view: *View) void {
+        if (!view.saved_surface_tree.node.enabled) return;
+
+        var it = view.saved_surface_tree.children.safeIterator(.forward);
+        while (it.next()) |node| node.destroy();
+
+        view.saved_surface_tree.node.setEnabled(false);
+        view.surface_tree.node.setEnabled(true);
+    }
+
+    pub fn saveSurfaceTree(view: *View) void {
+        assert(!view.saved_surface_tree.node.enabled);
+        assert(view.saved_surface_tree.children.empty());
+
+        view.surface_tree.node.forEachBuffer(*wlr.SceneTree, saveSurfaceTreeIter, view.saved_surface_tree);
+
+        view.surface_tree.node.setEnabled(false);
+        view.saved_surface_tree.node.setEnabled(true);
+    }
+
+    fn saveSurfaceTreeIter(
+        buffer: *wlr.SceneBuffer,
+        sx: c_int,
+        sy: c_int,
+        saved_surface_tree: *wlr.SceneTree,
+    ) void {
+        const saved = saved_surface_tree.createSceneBuffer(buffer.buffer) catch {
+            std.log.err("out of memory", .{});
+            return;
+        };
+        saved.node.setPosition(sx, sy);
+        saved.setDestSize(buffer.dst_width, buffer.dst_height);
+        saved.setSourceBox(&buffer.src_box);
+        saved.setTransform(buffer.transform);
+    }
+
+    pub fn setPendingOutput(view: *View, output: *axiom_output.Output) void {
+        view.pending.output = output;
+        //view.pending_wm_stack_link.remove();
+        view.pending_focus_stack_link.remove();
+
+        // switch (output.attachMode()) {
+        //     .top => output.pending.wm_stack.prepend(view),
+        //     .bottom => output.pending.wm_stack.append(view),
+        //     .after => |n| view.attachAfter(&output.pending, n),
+        //     .above => view.attachRelative(&output.pending, .above),
+        //     .below => view.attachRelative(&output.pending, .below),
+        // }
+        output.pending.focus_stack.prepend(view);
+
+        if (view.pending.fullscreen) {
+            view.pending.box = .{ .x = 0, .y = 0, .width = undefined, .height = undefined };
+            output.wlr_output.effectiveResolution(&view.pending.box.width, &view.pending.box.height);
+        } else if (view.pending.float) {
+            view.pending.clampToOutput();
+        }
     }
 
     pub fn close(view: View) void {
@@ -110,6 +537,7 @@ pub const View = struct {
             .none => {},
         }
     }
+
     pub fn destroyPopups(view: View) void {
         switch (view.impl) {
             .toplevel => |toplevel| toplevel.destroyPopups(),
@@ -117,11 +545,209 @@ pub const View = struct {
         }
     }
 
+    /// Return the current title of the view if any.
     pub fn getTitle(view: View) ?[*:0]const u8 {
+        assert(!view.destroying);
         return switch (view.impl) {
             .toplevel => |toplevel| toplevel.wlr_toplevel.title,
             .xwayland_view => |xwayland_view| xwayland_view.xwayland_surface.title,
             .none => unreachable,
         };
+    }
+
+    /// Return the current app_id of the view if any.
+    pub fn getAppId(view: View) ?[*:0]const u8 {
+        assert(!view.destroying);
+        return switch (view.impl) {
+            .toplevel => |toplevel| toplevel.wlr_toplevel.app_id,
+            // X11 clients don't have an app_id but the class serves a similar role.
+            .xwayland_view => |xwayland_view| xwayland_view.xwayland_surface.class,
+            .none => unreachable,
+        };
+    }
+
+    /// Return true if tearing should be allowed for the view.
+    pub fn allowTearing(view: *View) bool {
+        switch (view.tearing_mode) {
+            .no_tearing => return false,
+            .tearing => return true,
+            .window_hint => {
+                if (server.config.allow_tearing) {
+                    if (view.rootSurface()) |root_surface| {
+                        return server.tearing_control_manager.hintFromSurface(root_surface) == .@"async";
+                    }
+                }
+                return false;
+            },
+        }
+    }
+
+    /// Clamp the width/height of the box to the constraints of the view
+    pub fn applyConstraints(view: *View, box: *wlr.Box) void {
+        box.width = math.clamp(box.width, view.constraints.min_width, view.constraints.max_width);
+        box.height = math.clamp(box.height, view.constraints.min_height, view.constraints.max_height);
+    }
+
+    /// Attach after n visible, not-floating views in the pending wm_stack
+    // pub fn attachAfter(view: *View, output_pending: *axiom_output.PendingState, n: usize) void {
+    //     var visible: u32 = 0;
+    //     var it = output_pending.wm_stack.iterator(.forward);
+
+    //     while (it.next()) |other| {
+    //         if (visible >= n) break;
+    //         if (!other.pending.float and other.pending.tags & output_pending.tags != 0) {
+    //             visible += 1;
+    //         }
+    //     }
+
+    //     it.current.prev.?.insert(&view.pending_wm_stack_link);
+    // }
+
+    /// Attach above or below the currently focused view
+    // pub fn attachRelative(view: *View, output_pending: *axiom_output.PendingState, mode: AttachRelativeMode) void {
+    //     const focus_stack_head = output_pending.focus_stack.first() orelse {
+    //         output_pending.wm_stack.append(view);
+    //         return;
+    //     };
+
+    //     // There are two cases to consider here:
+    //     //
+    //     // 1. The first view in the focus stack is visible given the currently focused tags.
+    //     // In this case, inserting directly before/after that view in the wm_stack is correct.
+    //     //
+    //     // 2. There are no views visible given the currently focused tags. In this case it
+    //     // doesn't matter where in the wm_stack the new view is inserted as it will be the only
+    //     // view visible.
+
+    //     var it = output_pending.wm_stack.iterator(.forward);
+    //     while (it.next()) |other| {
+    //         if (other == focus_stack_head) {
+    //             switch (mode) {
+    //                 .above => other.pending_wm_stack_link.prev.?.insert(&view.pending_wm_stack_link),
+    //                 .below => other.pending_wm_stack_link.insert(&view.pending_wm_stack_link),
+    //             }
+    //             return;
+    //         }
+    //     }
+    // }
+
+    /// Called by the impl when the surface is ready to be displayed
+    pub fn map(view: *View) !void {
+        std.log.debug("view '{?s}' mapped", .{view.getTitle()});
+
+        assert(!view.mapped and !view.destroying);
+        view.mapped = true;
+
+        //view.foreign_toplevel_handle.map();
+
+        // if (server.config.rules.float.match(view)) |float| {
+        //     view.pending.float = float;
+        // }
+        // if (server.config.rules.fullscreen.match(view)) |fullscreen| {
+        //     view.pending.fullscreen = fullscreen;
+        // }
+        // if (server.config.rules.ssd.match(view)) |ssd| {
+        //     view.pending.ssd = ssd;
+        // }
+
+        // if (server.config.rules.tearing.match(view)) |tearing| {
+        //     view.tearing_mode = if (tearing) .tearing else .no_tearing;
+        // }
+
+        // if (server.config.rules.dimensions.match(view)) |dimensions| {
+        //     view.pending.box.width = dimensions.width;
+        //     view.pending.box.height = dimensions.height;
+        // }
+
+        const output = server.seat.focused_output;
+
+        if (output) |o| {
+            // Center the initial pending box on the output
+            view.pending.box.x = @divTrunc(@max(0, o.usable_box.width - view.pending.box.width), 2);
+            view.pending.box.y = @divTrunc(@max(0, o.usable_box.height - view.pending.box.height), 2);
+        }
+
+        view.pending.tags = blk: {
+            const default = if (output) |o| o.pending.tags else server.root.transaction.fallback_state.tags;
+            //if (server.config.rules.tags.match(view)) |tags| break :blk tags;
+            //const tags = default & server.config.spawn_tagmask;
+            break :blk default;
+        };
+
+        if (output) |o| {
+            view.setPendingOutput(o);
+
+            server.seat.focus(view);
+        } else {
+            std.log.debug("no output available for newly mapped view, adding to fallback stacks", .{});
+
+            //view.pending_wm_stack_link.remove();
+            view.pending_focus_stack_link.remove();
+
+            // switch (server.config.default_attach_mode) {
+            //     .top => server.root.fallback_pending.wm_stack.prepend(view),
+            //     .bottom => server.root.fallback_pending.wm_stack.append(view),
+            //     .after => |n| view.attachAfter(&server.root.fallback_pending, n),
+            //     .above => view.attachRelative(&server.root.fallback_pending, .above),
+            //     .below => view.attachRelative(&server.root.fallback_pending, .below),
+            // }
+            server.root.transaction.fallback_state.focus_stack.prepend(view);
+
+            //view.inflight_wm_stack_link.remove();
+            //view.inflight_wm_stack_link.init();
+
+            view.inflight_focus_stack_link.remove();
+            view.inflight_focus_stack_link.init();
+        }
+
+        view.float_box = view.pending.box;
+
+        server.root.transaction.applyPending();
+    }
+
+    /// Called by the impl when the surface will no longer be displayed
+    pub fn unmap(view: *View) void {
+        std.log.debug("view '{?s}' unmapped", .{view.getTitle()});
+
+        if (!view.saved_surface_tree.node.enabled) view.saveSurfaceTree();
+
+        {
+            view.pending.output = null;
+            view.pending_focus_stack_link.remove();
+            // view.pending_wm_stack_link.remove();
+            server.root.transaction.hidden.pending.focus_stack.prepend(view);
+            //server.root.transaction.hidden.pending.wm_stack.prepend(view);
+        }
+
+        assert(view.mapped and !view.destroying);
+        view.mapped = false;
+
+        //view.foreign_toplevel_handle.unmap();
+
+        server.root.transaction.applyPending();
+    }
+
+    pub fn notifyTitle(view: *const View) void {
+        // if (view.foreign_toplevel_handle.wlr_handle) |wlr_handle| {
+        //     if (view.getTitle()) |title| wlr_handle.setTitle(title);
+        // }
+        // Send title to all status listeners attached to a seat which focuses this view
+
+        _ = view;
+
+        // const seat = server.seat;
+        // if (seat_node.data.focused == .view and seat_node.data.focused.view == view) {
+        //     var client_it = seat_node.data.status_trackers.first;
+        //     while (client_it) |client_node| : (client_it = client_node.next) {
+        //         client_node.data.sendFocusedView();
+        //     }
+        // }
+    }
+
+    pub fn notifyAppId(view: View) void {
+        _ = view;
+        // if (view.foreign_toplevel_handle.wlr_handle) |wlr_handle| {
+        //     if (view.getAppId()) |app_id| wlr_handle.setAppId(app_id);
+        // }
     }
 };
