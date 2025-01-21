@@ -67,6 +67,7 @@ pub const ViewState = struct {
     focus: u32 = 0,
 
     float: bool = true,
+    maximized: bool = false,
     fullscreen: bool = false,
     urgent: bool = false,
     //ssd: bool = false,
@@ -161,6 +162,8 @@ pub const View = struct {
     /// The floating dimensions the view, saved so that they can be restored if the
     /// view returns to floating mode.
     float_box: wlr.Box = undefined,
+
+    post_maximize_box: wlr.Box = undefined,
 
     /// This state exists purely to allow for more intuitive behavior when
     /// exiting fullscreen if there is no active layout.
@@ -700,7 +703,7 @@ pub const View = struct {
             view.inflight_focus_stack_link.init();
         }
 
-        view.float_box = view.pending.box;
+        //view.float_box = view.pending.box;
 
         server.root.transaction.applyPending();
     }
@@ -725,6 +728,34 @@ pub const View = struct {
         //view.foreign_toplevel_handle.unmap();
 
         server.root.transaction.applyPending();
+    }
+
+    pub fn maximize(view: *View) void {
+        if (!view.current.maximized) {
+            std.log.info("View is not maximized", .{});
+            const box = &view.pending.box;
+            var width: c_int = undefined;
+            var height: c_int = undefined;
+            view.post_maximize_box = view.pending.box;
+            _ = view.pending.output.?.wlr_output.effectiveResolution(&width, &height);
+            box.* = .{
+                .width = width,
+                .height = height,
+                .x = 0,
+                .y = 0,
+            };
+            view.pending.maximized = true;
+        } else {
+            std.log.info("View is maximized", .{});
+            const box = &view.pending.box;
+            var width: c_int = undefined;
+            var height: c_int = undefined;
+            _ = view.pending.output.?.wlr_output.effectiveResolution(&width, &height);
+            box.* = view.post_maximize_box;
+            view.pending.maximized = false;
+        }
+
+        //server.root.transaction.applyPending();
     }
 
     pub fn notifyTitle(view: *const View) void {

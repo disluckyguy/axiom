@@ -44,6 +44,8 @@ pub const XwaylandView = struct {
     request_fullscreen: wl.Listener(void) = wl.Listener(void).init(handleRequestFullscreen),
     request_minimize: wl.Listener(*wlr.XwaylandSurface.event.Minimize) =
         wl.Listener(*wlr.XwaylandSurface.event.Minimize).init(handleRequestMinimize),
+    request_maximize: wl.Listener(void) =
+        wl.Listener(void).init(handleRequestMaximize),
     request_resize: wl.Listener(*wlr.XwaylandSurface.event.Resize) =
         wl.Listener(*wlr.XwaylandSurface.event.Resize).init(handleRequestResize),
 
@@ -160,6 +162,7 @@ pub const XwaylandView = struct {
         xwayland_surface.events.set_decorations.add(&xwayland_view.set_decorations);
         xwayland_surface.events.request_fullscreen.add(&xwayland_view.request_fullscreen);
         xwayland_surface.events.request_minimize.add(&xwayland_view.request_minimize);
+        xwayland_surface.events.request_maximize.add(&xwayland_view.request_maximize);
         xwayland_surface.events.request_move.add(&xwayland_view.request_move);
         xwayland_surface.events.request_resize.add(&xwayland_view.request_resize);
 
@@ -302,6 +305,13 @@ pub const XwaylandView = struct {
     ) void {
         const xwayland_view: *XwaylandView = @fieldParentPtr("request_minimize", listener);
         xwayland_view.xwayland_surface.setMinimized(event.minimize);
+    }
+
+    fn handleRequestMaximize(listener: *wl.Listener(void)) void {
+        const xwayland_view: *XwaylandView = @fieldParentPtr("request_maximize", listener);
+        xwayland_view.view.maximize();
+        xwayland_view.xwayland_surface.setMaximized(true);
+        server.root.transaction.applyPending();
     }
 
     fn handleRequestMove(listener: *wl.Listener(void)) void {

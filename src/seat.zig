@@ -192,7 +192,10 @@ pub const Seat = struct {
         // First clear the current focus
         switch (seat.focused) {
             .view => |view| {
-                view.pending.focus -= 1;
+                if (view.pending.focus > 0) {
+                    view.pending.focus -= 1;
+                }
+
                 view.destroyPopups();
             },
             // .layer => |layer_surface| {

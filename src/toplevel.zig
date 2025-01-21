@@ -56,6 +56,7 @@ pub const Toplevel = struct {
         wl.Listener(*wlr.XdgToplevel.event.Move).init(handleRequestMove),
     request_resize: wl.Listener(*wlr.XdgToplevel.event.Resize) =
         wl.Listener(*wlr.XdgToplevel.event.Resize).init(handleRequestResize),
+    request_maximize: wl.Listener(void) = wl.Listener(void).init(handleRequestMaximize),
     set_title: wl.Listener(void) = wl.Listener(void).init(handleSetTitle),
     set_app_id: wl.Listener(void) = wl.Listener(void).init(handleSetAppId),
 
@@ -217,6 +218,7 @@ pub const Toplevel = struct {
         toplevel.wlr_toplevel.events.request_fullscreen.add(&toplevel.request_fullscreen);
         toplevel.wlr_toplevel.events.request_move.add(&toplevel.request_move);
         toplevel.wlr_toplevel.events.request_resize.add(&toplevel.request_resize);
+        toplevel.wlr_toplevel.events.request_maximize.add(&toplevel.request_maximize);
         toplevel.wlr_toplevel.events.set_title.add(&toplevel.set_title);
         toplevel.wlr_toplevel.events.set_app_id.add(&toplevel.set_app_id);
 
@@ -455,6 +457,14 @@ pub const Toplevel = struct {
                 .move, .resize => {},
             }
         }
+    }
+
+    fn handleRequestMaximize(listener: *wl.Listener(void)) void {
+        std.log.info("Maximize requested", .{});
+        const toplevel: *Toplevel = @fieldParentPtr("request_maximize", listener);
+        toplevel.view.maximize();
+        _ = toplevel.wlr_toplevel.setMaximized(toplevel.view.pending.maximized);
+        server.root.transaction.applyPending();
     }
 
     /// Called when the client sets / updates its title
