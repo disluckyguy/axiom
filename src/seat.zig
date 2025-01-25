@@ -277,60 +277,6 @@ pub const Seat = struct {
         }
     }
 
-    //TODO: remove
-    pub fn focusView(seat: *Seat, view: *axiom_view.View, surface: *wlr.Surface) void {
-        if (seat.seat.keyboard_state.focused_surface) |previous_surface| {
-            if (previous_surface == surface) return;
-            if (wlr.XdgSurface.tryFromWlrSurface(previous_surface)) |xdg_surface| {
-                _ = xdg_surface.role_data.toplevel.?.setActivated(false);
-            } else if (wlr.XwaylandSurface.tryFromWlrSurface(previous_surface)) |xwayland_surface| {
-                _ = xwayland_surface.activate(false);
-            }
-        }
-
-        //const server = seat.server;
-
-        view.tree.node.raiseToTop();
-        view.link.remove();
-        server.views.prepend(view);
-
-        switch (view.impl) {
-            .xwayland_view => |xwayland_view| {
-                xwayland_view.xwayland_surface.activate(true);
-            },
-            .toplevel => |toplevel| {
-                _ = toplevel.wlr_toplevel.setActivated(true);
-            },
-            .none => {},
-        }
-
-        const wlr_keyboard = server.seat.seat.getKeyboard() orelse return;
-        server.seat.seat.keyboardNotifyEnter(
-            surface,
-            wlr_keyboard.keycodes[0..wlr_keyboard.num_keycodes],
-            &wlr_keyboard.modifiers,
-        );
-    }
-
-    //TODO: remove
-    pub fn focusOverrideRedirect(_: *Seat, override_redirect: *axiom_xwayland.XwaylandOverrideRedirect) void {
-        //const server = seat.server;
-        const surface = override_redirect.surface.surface orelse return;
-
-        const surface_tree = override_redirect.surface_tree orelse return;
-        surface_tree.node.raiseToTop();
-
-        server.override_redirect_tree.node.raiseToTop();
-
-        const wlr_keyboard = server.seat.seat.getKeyboard() orelse return;
-
-        server.seat.seat.keyboardNotifyEnter(
-            surface,
-            wlr_keyboard.keycodes[0..wlr_keyboard.num_keycodes],
-            &wlr_keyboard.modifiers,
-        );
-    }
-
     pub fn requestSetSelection(
         listener: *wl.Listener(*wlr.Seat.event.RequestSetSelection),
         event: *wlr.Seat.event.RequestSetSelection,
@@ -343,20 +289,11 @@ pub const Seat = struct {
     /// Returns true if the key was handled
     pub fn handleKeybind(seat: *Seat, key: xkb.Keysym) bool {
         //const server = seat.server;
+        _ = seat;
         switch (@intFromEnum(key)) {
             // Exit the compositor
             xkb.Keysym.Escape => {
                 server.wl_server.terminate();
-            },
-            // Focus the next toplevel in the stack, pushing the current top to the back
-            xkb.Keysym.F1 => {
-                if (server.views.length() < 2) return true;
-                if (server.views.link.prev) |prev| {
-                    const view: *axiom_view.View = @fieldParentPtr("link", prev);
-                    const surface = view.rootSurface() orelse return false;
-                    std.log.info("focusing surface", .{});
-                    seat.focusView(view, surface);
-                }
             },
 
             xkb.Keysym.F2 => {
