@@ -6,12 +6,12 @@ Current goals:
 - [x] separate output management to "root"
 - [x] implement transaction section
 - [x] fix popup positioning
-- [] add fullscreen
-- [] add input manager
-- [] add layer shell
-- [] add lock surface
-- [] add clipboard
-- [] add tablet mode
+- [ ] add fullscreen
+- [ ] add input manager
+- [ ] add layer shell
+- [ ] add lock surface
+- [ ] add clipboard
+- [ ] add tablet mode
 
-This compositor is inpired by and uses code from (river)[https://codeberg.org/river/river]
+This compositor is inspired by and uses code from [river](https://codeberg.org/river/river)
 
