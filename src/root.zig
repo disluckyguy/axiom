@@ -20,6 +20,8 @@ const AxiomData = @import("scene_node_data.zig").Data;
 
 const gpa = @import("utils.zig").gpa;
 
+const server = &@import("main.zig").server;
+
 pub const Root = struct {
     server: *axiom_server.Server,
     scene: *wlr.Scene,
@@ -61,7 +63,7 @@ pub const Root = struct {
     gamma_control_set_gamma: wl.Listener(*wlr.GammaControlManagerV1.event.SetGamma) =
         wl.Listener(*wlr.GammaControlManagerV1.event.SetGamma).init(handleSetGamma),
 
-    pub fn init(root: *Root, server: *axiom_server.Server) !void {
+    pub fn init(root: *Root) !void {
         const output_layout = try wlr.OutputLayout.create(server.wl_server);
         errdefer output_layout.destroy();
 
@@ -154,11 +156,8 @@ pub const Root = struct {
         root.handleOutputConfigChange() catch std.log.err("out of memory", .{});
     }
 
-    pub fn newOutput(listener: *wl.Listener(*wlr.Output), wlr_output: *wlr.Output) void {
-        const root: *Root = @fieldParentPtr("new_output", listener);
-        const server = root.server;
-
-        axiom_output.Output.create(server, wlr_output) catch |err| {
+    pub fn newOutput(_: *wl.Listener(*wlr.Output), wlr_output: *wlr.Output) void {
+        axiom_output.Output.create(wlr_output) catch |err| {
             switch (err) {
                 error.OutOfMemory => std.log.err("out of memory", .{}),
                 error.InitRenderFailed => std.log.err("failed to initialize renderer for output {s}", .{wlr_output.name}),
@@ -270,8 +269,6 @@ pub const Root = struct {
             var it = root.active_outputs.iterator(.forward);
             while (it.next()) |o| if (o == output) return;
         }
-
-        const server = root.server;
 
         const first = root.active_outputs.empty();
 

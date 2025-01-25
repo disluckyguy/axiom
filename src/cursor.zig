@@ -380,6 +380,8 @@ pub const Cursor = struct {
         // Guard against assertion in enterMode()
         if (view.current.output == null) return;
 
+        if (view.current.maximized) view.maximize();
+
         // if (cursor.constraint) |constraint| {
         //     if (constraint.state == .active) constraint.deactivate();
         // }
@@ -567,7 +569,7 @@ pub const Cursor = struct {
                 // based on the dimensions actually committed by the client.
                 //const border_width = if (data.view.pending.ssd) server.config.border_width else 0;
 
-                const border_width = 0;
+                const border_width = 5;
                 const output = data.view.current.output orelse {
                     data.view.pending.resizing = false;
 

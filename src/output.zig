@@ -11,6 +11,8 @@ const axiom_view = @import("view.zig");
 const axiom_root = @import("root.zig");
 const gpa = @import("utils.zig").gpa;
 
+const server = &@import("main.zig").server;
+
 pub const PendingState = struct {
     tags: u32 = 1 << 0,
     focus_stack: wl.list.Head(axiom_view.View, .pending_focus_stack_link),
@@ -63,7 +65,7 @@ pub const Output = struct {
     destroy: wl.Listener(*wlr.Output) = wl.Listener(*wlr.Output).init(destroy),
     present: wl.Listener(*wlr.Output.event.Present) = wl.Listener(*wlr.Output.event.Present).init(handlePresent),
 
-    pub fn create(server: *axiom_server.Server, wlr_output: *wlr.Output) !void {
+    pub fn create(wlr_output: *wlr.Output) !void {
         const output: *Output = try gpa.create(Output);
         errdefer gpa.destroy(output);
 
@@ -205,8 +207,6 @@ pub const Output = struct {
     }
 
     fn renderAndCommit(output: *Output, scene_output: *wlr.SceneOutput) !void {
-        const server = output.server;
-
         if (!output.wlr_output.needs_frame and !output.gamma_dirty and
             !scene_output.pending_commit_damage.notEmpty())
         {

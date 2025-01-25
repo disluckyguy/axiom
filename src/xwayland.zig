@@ -317,25 +317,10 @@ pub const XwaylandView = struct {
     fn handleRequestMove(listener: *wl.Listener(void)) void {
         std.log.info("starting move", .{});
         const xwayland_view: *XwaylandView = @fieldParentPtr("request_move", listener);
-        const seat = server.seat;
+        const seat: *axiom_seat.Seat = @ptrFromInt(server.xwayland.seat.?.data);
         const view = xwayland_view.view;
 
-        if (view.pending.fullscreen) return;
-
-        if (view.current.output) |current_output| {
-            if (view.current.tags & current_output.current.tags == 0) return;
-        }
-        // if (view.pending.output) |pending_output| {
-        //     if (!(view.pending.float or pending_output.layout == null)) return;
-        // }
-        //view.destroyPopups();
-
-        // Moving windows with touch or tablet tool is not yet supported.
-
-        switch (seat.cursor.cursor_mode) {
-            .passthrough => seat.cursor.startMove(view),
-            .move, .resize => {},
-        }
+        view.move(seat);
     }
 
     fn handleRequestResize(
@@ -344,25 +329,9 @@ pub const XwaylandView = struct {
     ) void {
         std.log.info("resize requested", .{});
         const xwayland_view: *XwaylandView = @fieldParentPtr("request_resize", listener);
-        const seat = server.seat;
         const view = xwayland_view.view;
 
-        if (view.pending.fullscreen) return;
-
-        if (view.current.output) |current_output| {
-            if (view.current.tags & current_output.current.tags == 0) return;
-        }
-        // if (view.pending.output) |pending_output| {
-        //     if (!(view.pending.float or pending_output.layout == null)) return;
-        // }
-        //view.destroyPopups();
-
-        // Moving windows with touch or tablet tool is not yet supported.
-
-        switch (seat.cursor.cursor_mode) {
-            .passthrough => seat.cursor.startResize(view, null),
-            .move, .resize => {},
-        }
+        view.resize(null);
     }
 };
 

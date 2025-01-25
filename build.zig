@@ -66,6 +66,31 @@ pub fn build(b: *std.Build) void {
 
     b.installArtifact(axiom);
 
+    const axiom_check = b.addExecutable(.{
+        .name = "foo",
+        .root_source_file = b.path("src/main.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
+    // Any other code to define dependencies would
+    // probably be here.
+
+    axiom_check.linkLibC();
+
+    axiom_check.root_module.addImport("wayland", wayland);
+    axiom_check.root_module.addImport("xkbcommon", xkbcommon);
+    axiom_check.root_module.addImport("wlroots", wlroots);
+
+    axiom_check.linkSystemLibrary("wayland-server");
+    axiom_check.linkSystemLibrary("xkbcommon");
+    axiom_check.linkSystemLibrary("pixman-1");
+
+    // These two lines you might want to copy
+    // (make sure to rename 'exe_check')
+    const check = b.step("check", "Check if foo compiles");
+    check.dependOn(&axiom_check.step);
+
     // This *creates* a Run step in the build graph, to be executed when another
     // step is evaluated that depends on it. The next line below will establish
     // such a dependency.

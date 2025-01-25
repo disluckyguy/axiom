@@ -415,56 +415,20 @@ pub const Toplevel = struct {
     ) void {
         const toplevel: *Toplevel = @fieldParentPtr("request_move", listener);
         const seat: *axiom_seat.Seat = @ptrFromInt(event.seat.seat.data);
-        const view = toplevel.view;
-
-        if (view.pending.fullscreen) return;
-
-        if (view.current.output) |current_output| {
-            if (view.current.tags & current_output.current.tags == 0) return;
-        }
-        // if (view.pending.output) |pending_output| {
-        //     if (!(view.pending.float or pending_output.layout == null)) return;
-        // }
-        view.destroyPopups();
-
-        // Moving windows with touch or tablet tool is not yet supported.
-        if (seat.seat.validatePointerGrabSerial(null, event.serial)) {
-            switch (seat.cursor.cursor_mode) {
-                .passthrough => seat.cursor.startMove(view),
-                .move, .resize => {},
-            }
-        }
+        toplevel.view.move(seat);
     }
 
     fn handleRequestResize(listener: *wl.Listener(*wlr.XdgToplevel.event.Resize), event: *wlr.XdgToplevel.event.Resize) void {
         const toplevel: *Toplevel = @fieldParentPtr("request_resize", listener);
-        const seat: *axiom_seat.Seat = @ptrFromInt(event.seat.seat.data);
-        const view = toplevel.view;
 
-        if (view.pending.fullscreen) return;
-
-        if (view.current.output) |current_output| {
-            if (view.current.tags & current_output.current.tags == 0) return;
-        }
-        // if (view.pending.output) |pending_output| {
-        //     if (!(view.pending.float or pending_output.layout == null)) return;
-        // }
-
-        // Resizing windows with touch or tablet tool is not yet supported.
-        if (seat.seat.validatePointerGrabSerial(null, event.serial)) {
-            switch (seat.cursor.cursor_mode) {
-                .passthrough => seat.cursor.startResize(view, event.edges),
-                .move, .resize => {},
-            }
-        }
+        toplevel.view.resize(event.edges);
     }
 
     fn handleRequestMaximize(listener: *wl.Listener(void)) void {
         std.log.info("Maximize requested", .{});
         const toplevel: *Toplevel = @fieldParentPtr("request_maximize", listener);
-        toplevel.view.maximize();
         _ = toplevel.wlr_toplevel.setMaximized(toplevel.view.pending.maximized);
-        server.root.transaction.applyPending();
+        toplevel.view.maximize();
     }
 
     /// Called when the client sets / updates its title

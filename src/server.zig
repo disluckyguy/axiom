@@ -76,7 +76,7 @@ pub const Server = struct {
             .xwayland = undefined,
         };
 
-        try server.root.init(server);
+        try server.root.init();
 
         server.views.init();
 

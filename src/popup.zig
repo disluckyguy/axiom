@@ -66,7 +66,6 @@ pub const Popup = struct {
         const node_data: *AxiomSceneNodeData = @ptrFromInt(popup.root_tree.node.data);
         const view = node_data.data.view;
 
-        std.log.info("View: {}", .{view});
         const output = view.rootSurface().?.current_outputs.first().?.output;
         var box: wlr.Box = undefined;
         server.root.output_layout.getBox(output, &box);
@@ -75,11 +74,11 @@ pub const Popup = struct {
         var root_ly: c_int = undefined;
         _ = popup.root_tree.node.coords(&root_lx, &root_ly);
 
-        std.log.info("{}", .{popup.scene_tree.node.x});
+        //std.log.info("{}", .{popup.scene_tree.node.x});
 
         box.x -= root_lx;
         box.y -= root_ly;
 
-        std.log.info("{}", .{box.y});
+        //std.log.info("{}", .{box.y});
     }
 };

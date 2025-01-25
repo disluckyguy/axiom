@@ -71,6 +71,7 @@ pub const ViewState = struct {
     fullscreen: bool = false,
     urgent: bool = false,
     //ssd: bool = false,
+    resizable: bool = true,
     resizing: bool = false,
 
     /// Modify the x/y of the given state by delta_x/delta_y, clamping to the
@@ -257,6 +258,49 @@ pub const View = struct {
                 .assert => unreachable,
             }
         }
+    }
+
+    pub fn resize(
+        view: *View,
+        edges: ?wlr.Edges,
+    ) void {
+        if (view.pending.fullscreen or !view.pending.resizable) return;
+
+        if (view.current.output) |current_output| {
+            if (view.current.tags & current_output.current.tags == 0) return;
+        }
+        // if (view.pending.output) |pending_output| {
+        //     if (!(view.pending.float or pending_output.layout == null)) return;
+        // }
+
+        // Resizing windows with touch or tablet tool is not yet supported.
+        switch (server.seat.cursor.cursor_mode) {
+            .passthrough => server.seat.cursor.startResize(view, edges),
+            .move, .resize => {},
+        }
+    }
+
+    pub fn move(
+        view: *View,
+        seat: *axiom_seat.Seat,
+    ) void {
+        if (view.pending.fullscreen) return;
+
+        if (view.current.output) |current_output| {
+            if (view.current.tags & current_output.current.tags == 0) return;
+        }
+        // if (view.pending.output) |pending_output| {
+        //     if (!(view.pending.float or pending_output.layout == null)) return;
+        // }
+        view.destroyPopups();
+
+        // Moving windows with touch or tablet tool is not yet supported.
+        //if (seat.seat.validatePointerGrabSerial(null, event.serial)) {
+        switch (seat.cursor.cursor_mode) {
+            .passthrough => seat.cursor.startMove(view),
+            .move, .resize => {},
+        }
+        //}
     }
 
     /// The change in x/y position of the view during resize cannot be determined
@@ -734,6 +778,7 @@ pub const View = struct {
         if (!view.current.maximized) {
             std.log.info("View is not maximized", .{});
             const box = &view.pending.box;
+
             var width: c_int = undefined;
             var height: c_int = undefined;
             view.post_maximize_box = view.pending.box;
@@ -744,7 +789,9 @@ pub const View = struct {
                 .x = 0,
                 .y = 0,
             };
+
             view.pending.maximized = true;
+            view.pending.resizable = false;
         } else {
             std.log.info("View is maximized", .{});
             const box = &view.pending.box;
@@ -753,9 +800,10 @@ pub const View = struct {
             _ = view.pending.output.?.wlr_output.effectiveResolution(&width, &height);
             box.* = view.post_maximize_box;
             view.pending.maximized = false;
+            view.pending.resizable = true;
         }
 
-        //server.root.transaction.applyPending();
+        server.root.transaction.applyPending();
     }
 
     pub fn notifyTitle(view: *const View) void {
