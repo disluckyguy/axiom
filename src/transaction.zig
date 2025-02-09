@@ -81,9 +81,14 @@ pub const Transaction = struct {
     }
 
     pub fn applyPending(transaction: *Transaction) void {
-
-        // var seat = server.seat;
-        // seat.seat.focus;
+        {
+            // Changes to the pending state may require a focus update to keep
+            // state consistent. Instead of having focus(null) calls spread all
+            // around the codebase and risk forgetting one, always ensure focus
+            // state is synchronized here.
+            var it = server.input_manager.seats.first;
+            while (it) |node| : (it = node.next) node.data.focus(null);
+        }
 
         // If there is already a transaction inflight, wait until it completes.
         if (transaction.inflight_layout_demands > 0 or transaction.inflight_configures > 0) {
@@ -120,7 +125,7 @@ pub const Transaction = struct {
                 {
                     var it = output.pending.focus_stack.iterator(.forward);
 
-                    if (output.pending.focus_stack.empty()) server.seat.focus(null);
+                    //if (output.pending.focus_stack.empty()) server.seat.focus(null);
                     while (it.next()) |view| {
                         std.debug.assert(view.pending.output == output);
 
@@ -216,13 +221,16 @@ pub const Transaction = struct {
         //     cursor.inflight_mode = cursor.cursor_mode;
         // }
 
-        {
-            const cursor = server.seat.cursor;
+        var it = server.input_manager.seats.first;
+        while (it) |node| : (it = node.next) {
+            const cursor = &node.data.cursor;
+
             switch (cursor.cursor_mode) {
-                .passthrough => {},
+                .passthrough => {}, //.passthrough, .down => {},
                 inline .move, .resize => |data| {
                     if (data.view.inflight.output == null or
                         data.view.inflight.tags & data.view.inflight.output.?.inflight.tags == 0 or
+                        //(!data.view.inflight.float and data.view.inflight.output.?.layout != null) or
                         data.view.inflight.fullscreen)
                     {
                         cursor.cursor_mode = .passthrough;
@@ -234,7 +242,6 @@ pub const Transaction = struct {
 
             cursor.inflight_mode = cursor.cursor_mode;
         }
-
         if (transaction.inflight_layout_demands == 0) {
             transaction.sendConfigures();
         }

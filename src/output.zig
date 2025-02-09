@@ -172,7 +172,7 @@ pub const Output = struct {
         wlr_output.events.frame.add(&output.frame);
         wlr_output.events.present.add(&output.present);
 
-        server.seat.focused_output = output;
+        //server.input_manager.defaultSeat().focused_output = output;
         output.enableDisable();
     }
 
@@ -180,6 +180,7 @@ pub const Output = struct {
         output.gamma_dirty = true;
 
         if (output.wlr_output.enabled) {
+            std.debug.print("activating output \n", .{});
             output.server.root.activateOutput(output);
         } else {
             output.server.root.deactivateOutput(output);
