@@ -275,7 +275,7 @@ pub const View = struct {
 
         // Resizing windows with touch or tablet tool is not yet supported.
         // TODO: do this properly
-        switch (server.input_manager.defaultSeat().cursor.cursor_mode) {
+        switch (server.input_manager.defaultSeat().cursor.current_mode) {
             .passthrough => server.input_manager.defaultSeat().cursor.startResize(view, edges),
             .move, .resize => {},
         }
@@ -297,7 +297,7 @@ pub const View = struct {
 
         // Moving windows with touch or tablet tool is not yet supported.
         //if (seat.seat.validatePointerGrabSerial(null, event.serial)) {
-        switch (seat.cursor.cursor_mode) {
+        switch (seat.cursor.current_mode) {
             .passthrough => seat.cursor.startMove(view),
             .move, .resize => {},
         }

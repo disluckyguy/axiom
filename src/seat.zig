@@ -160,6 +160,10 @@ pub const Seat = struct {
         }
     }
 
+    pub fn notifyActivity(seat: Seat) void {
+        server.input_manager.idle_notifier.notifyActivity(seat.seat);
+    }
+
     pub fn focus(seat: *Seat, _target: ?*axiom_view.View) void {
         var target = _target;
 

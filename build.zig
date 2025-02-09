@@ -25,6 +25,17 @@ pub fn build(b: *std.Build) void {
     scanner.generate("wl_data_device_manager", 3);
     scanner.generate("xdg_wm_base", 2);
 
+    //scanner.generate("zwp_pointer_gestures_v1", 3);
+    //scanner.generate("zwp_pointer_constraints_v1", 1);
+    //scanner.generate("zwp_tablet_manager_v2", 2);
+    //scanner.generate("zxdg_decoration_manager_v1", 1);
+    //scanner.generate("ext_session_lock_manager_v1", 1);
+    //scanner.generate("wp_cursor_shape_manager_v1", 1);
+    //scanner.generate("wp_tearing_control_manager_v1", 1);
+
+    scanner.generate("zwlr_layer_shell_v1", 4);
+    scanner.generate("zwlr_output_power_manager_v1", 1);
+
     const wayland = b.createModule(.{ .root_source_file = scanner.result });
     const xkbcommon = b.dependency("zig-xkbcommon", .{}).module("xkbcommon");
     const pixman = b.dependency("zig-pixman", .{}).module("pixman");
@@ -34,9 +45,6 @@ pub fn build(b: *std.Build) void {
     wlroots.addImport("xkbcommon", xkbcommon);
     wlroots.addImport("pixman", pixman);
     wlroots.addImport("wlroots", wlroots);
-
-    scanner.generate("zwlr_layer_shell_v1", 4);
-    scanner.generate("zwlr_output_power_manager_v1", 1);
 
     // We need to ensure the wlroots include path obtained from pkg-config is
     // exposed to the wlroots module for @cImport() to work. This seems to be

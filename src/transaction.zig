@@ -203,7 +203,7 @@ pub const Transaction = struct {
         //     const seat = server.seat;
         //     const cursor = seat.cursor;
 
-        //     switch (cursor.cursor_mode) {
+        //     switch (cursor.current_mode) {
         //         .passthrough => {},
         //         inline .move, .resize => |data| {
         //             if (data.view.inflight.output == null or
@@ -211,21 +211,21 @@ pub const Transaction = struct {
         //                 (!data.view.inflight.float) or
         //                 data.view.inflight.fullscreen)
         //             {
-        //                 cursor.cursor_mode = .passthrough;
+        //                 cursor.current_mode = .passthrough;
         //                 data.view.pending.resizing = false;
         //                 data.view.inflight.resizing = false;
         //             }
         //         },
         //     }
 
-        //     cursor.inflight_mode = cursor.cursor_mode;
+        //     cursor.inflight_mode = cursor.current_mode;
         // }
 
         var it = server.input_manager.seats.first;
         while (it) |node| : (it = node.next) {
             const cursor = &node.data.cursor;
 
-            switch (cursor.cursor_mode) {
+            switch (cursor.current_mode) {
                 .passthrough => {}, //.passthrough, .down => {},
                 inline .move, .resize => |data| {
                     if (data.view.inflight.output == null or
@@ -233,14 +233,14 @@ pub const Transaction = struct {
                         //(!data.view.inflight.float and data.view.inflight.output.?.layout != null) or
                         data.view.inflight.fullscreen)
                     {
-                        cursor.cursor_mode = .passthrough;
+                        cursor.current_mode = .passthrough;
                         data.view.pending.resizing = false;
                         data.view.inflight.resizing = false;
                     }
                 },
             }
 
-            cursor.inflight_mode = cursor.cursor_mode;
+            cursor.inflight_mode = cursor.current_mode;
         }
         if (transaction.inflight_layout_demands == 0) {
             transaction.sendConfigures();
