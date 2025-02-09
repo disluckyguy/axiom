@@ -149,23 +149,23 @@ pub const Cursor = struct {
 
         // If this cursor belongs to the default seat, set the xcursor environment
         // variables as well as the xwayland cursor theme.
-        //if (cursor.seat == server.input_manager.defaultSeat()) {
-        const size_str = try std.fmt.allocPrintZ(gpa, "{}", .{size});
-        defer gpa.free(size_str);
-        if (c.setenv("XCURSOR_SIZE", size_str.ptr, 1) < 0) return error.OutOfMemory;
-        if (theme) |t| if (c.setenv("XCURSOR_THEME", t, 1) < 0) return error.OutOfMemory;
-        try xcursor_manager.load(1);
-        const wlr_xcursor = xcursor_manager.getXcursor("default", 1).?;
-        const image = wlr_xcursor.images[0];
-        server.xwayland.setCursor(
-            image.buffer,
-            image.width * 4,
-            image.width,
-            image.height,
-            @intCast(image.hotspot_x),
-            @intCast(image.hotspot_y),
-        );
-        //}
+        if (cursor.seat == server.input_manager.defaultSeat()) {
+            const size_str = try std.fmt.allocPrintZ(gpa, "{}", .{size});
+            defer gpa.free(size_str);
+            if (c.setenv("XCURSOR_SIZE", size_str.ptr, 1) < 0) return error.OutOfMemory;
+            if (theme) |t| if (c.setenv("XCURSOR_THEME", t, 1) < 0) return error.OutOfMemory;
+            try xcursor_manager.load(1);
+            const wlr_xcursor = xcursor_manager.getXcursor("default", 1).?;
+            const image = wlr_xcursor.images[0];
+            server.xwayland.setCursor(
+                image.buffer,
+                image.width * 4,
+                image.width,
+                image.height,
+                @intCast(image.hotspot_x),
+                @intCast(image.hotspot_y),
+            );
+        }
 
         // Everything fallible is now done so the the old xcursor_manager can be destroyed.
         cursor.xcursor_manager.destroy();
@@ -235,46 +235,46 @@ pub const Cursor = struct {
     //     const server = cursor.server;
     //     switch (cursor.cursor_mode) {
     //         .passthrough => if (server.viewAt(cursor.wlr_cursor.x, cursor.wlr_cursor.y)) |res| {
-    //             server.seat.seat.pointerNotifyEnter(res.surface, res.sx, res.sy);
-    //             server.seat.seat.pointerNotifyMotion(time_msec, res.sx, res.sy);
+    //             cursor.seat.seat.pointerNotifyEnter(res.surface, res.sx, res.sy);
+    //             cursor.seat.seat.pointerNotifyMotion(time_msec, res.sx, res.sy);
     //         } else if (server.overrideRedirectAt(cursor.wlr_cursor.x, cursor.wlr_cursor.y)) |res| {
-    //             server.seat.seat.pointerNotifyEnter(res.surface, res.sx, res.sy);
-    //             server.seat.seat.pointerNotifyMotion(time_msec, res.sx, res.sy);
+    //             cursor.seat.seat.pointerNotifyEnter(res.surface, res.sx, res.sy);
+    //             cursor.seat.seat.pointerNotifyMotion(time_msec, res.sx, res.sy);
     //         } else {
     //             cursor.wlr_cursor.setXcursor(cursor.cursor_mgr, "default");
-    //             server.seat.seat.pointerClearFocus();
+    //             cursor.seat.seat.pointerClearFocus();
     //         },
     //         .move => {
-    //             const view = server.seat.grabbed_view.?;
-    //             view.box.x = @as(i32, @intFromFloat(cursor.wlr_cursor.x - server.seat.grab_x));
-    //             view.box.y = @as(i32, @intFromFloat(cursor.wlr_cursor.y - server.seat.grab_y));
+    //             const view = cursor.seat.grabbed_view.?;
+    //             view.box.x = @as(i32, @intFromFloat(cursor.wlr_cursor.x - cursor.seat.grab_x));
+    //             view.box.y = @as(i32, @intFromFloat(cursor.wlr_cursor.y - cursor.seat.grab_y));
     //             view.scene_tree.node.setPosition(view.box.x, view.box.y);
     //         },
     //         .resize => {
-    //             const view = server.seat.grabbed_view.?;
-    //             const border_x = @as(i32, @intFromFloat(cursor.wlr_cursor.x - server.seat.grab_x));
-    //             const border_y = @as(i32, @intFromFloat(cursor.wlr_cursor.y - server.seat.grab_y));
+    //             const view = cursor.seat.grabbed_view.?;
+    //             const border_x = @as(i32, @intFromFloat(cursor.wlr_cursor.x - cursor.seat.grab_x));
+    //             const border_y = @as(i32, @intFromFloat(cursor.wlr_cursor.y - cursor.seat.grab_y));
 
-    //             var new_left = server.seat.grab_box.x;
-    //             var new_right = server.seat.grab_box.x + server.seat.grab_box.width;
-    //             var new_top = server.seat.grab_box.y;
-    //             var new_bottom = server.seat.grab_box.y + server.seat.grab_box.height;
+    //             var new_left = cursor.seat.grab_box.x;
+    //             var new_right = cursor.seat.grab_box.x + cursor.seat.grab_box.width;
+    //             var new_top = cursor.seat.grab_box.y;
+    //             var new_bottom = cursor.seat.grab_box.y + cursor.seat.grab_box.height;
 
-    //             if (server.seat.resize_edges.top) {
+    //             if (cursor.seat.resize_edges.top) {
     //                 new_top = border_y;
     //                 if (new_top >= new_bottom)
     //                     new_top = new_bottom - 1;
-    //             } else if (server.seat.resize_edges.bottom) {
+    //             } else if (cursor.seat.resize_edges.bottom) {
     //                 new_bottom = border_y;
     //                 if (new_bottom <= new_top)
     //                     new_bottom = new_top + 1;
     //             }
 
-    //             if (server.seat.resize_edges.left) {
+    //             if (cursor.seat.resize_edges.left) {
     //                 new_left = border_x;
     //                 if (new_left >= new_right)
     //                     new_left = new_right - 1;
-    //             } else if (server.seat.resize_edges.right) {
+    //             } else if (cursor.seat.resize_edges.right) {
     //                 new_right = border_x;
     //                 if (new_right <= new_left)
     //                     new_right = new_left + 1;
@@ -806,9 +806,8 @@ pub const Cursor = struct {
     ) void {
         const cursor: *Cursor = @fieldParentPtr("cursor_axis", listener);
 
-        _ = cursor;
         //const server = cursor.server;
-        server.seat.seat.pointerNotifyAxis(
+        cursor.seat.seat.pointerNotifyAxis(
             event.time_msec,
             event.orientation,
             event.delta,
@@ -820,9 +819,8 @@ pub const Cursor = struct {
 
     pub fn cursorFrame(listener: *wl.Listener(*wlr.Cursor), _: *wlr.Cursor) void {
         const cursor: *Cursor = @fieldParentPtr("cursor_frame", listener);
-        _ = cursor;
         // const server = cursor.server;
-        server.seat.seat.pointerNotifyFrame();
+        cursor.seat.seat.pointerNotifyFrame();
     }
 
     fn updateKeyboardFocus(cursor: Cursor, result: axiom_root.Root.AtResult) void {
@@ -869,7 +867,7 @@ pub const Cursor = struct {
 
     //     const fullscreen = view.current.fullscreen or view.pending.fullscreen;
 
-    //     return for (cursor.server.seat.) |mapping| {
+    //     return for (cursor.cursor.seat.) |mapping| {
     //         if (event.button == mapping.event_code and std.meta.eql(modifiers, mapping.modifiers)) {
     //             switch (mapping.action) {
     //                 .move => if (!fullscreen) cursor.startMove(view),

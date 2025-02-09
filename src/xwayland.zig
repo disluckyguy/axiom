@@ -443,7 +443,7 @@ pub const XwaylandOverrideRedirect = struct {
         if (override_redirect.xwayland_surface.overrideRedirectWantsFocus() and
             override_redirect.xwayland_surface.icccmInputModel() != .none)
         {
-            const seat = server.seat;
+            const seat = server.input_manager.defaultSeat();
             // Keep the parent top-level Xwayland view of any override redirect surface
             // activated while that override redirect surface is focused. This ensures
             // override redirect menus do not disappear as a result of deactivating
@@ -470,7 +470,7 @@ pub const XwaylandOverrideRedirect = struct {
 
         // If the unmapped surface is currently focused, pass keyboard focus
         // to the most appropriate surface.
-        const seat = server.seat;
+        const seat = server.input_manager.defaultSeat();
         if (seat.focused == .view and seat.focused.view.impl == .xwayland_view and
             seat.focused.view.impl.xwayland_view.xwayland_surface.pid == override_redirect.xwayland_surface.pid and
             seat.seat.keyboard_state.focused_surface == override_redirect.xwayland_surface.surface)

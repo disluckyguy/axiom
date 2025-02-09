@@ -77,13 +77,13 @@ pub const ViewState = struct {
     /// Modify the x/y of the given state by delta_x/delta_y, clamping to the
     /// bounds of the output.
     pub fn move(state: *ViewState, delta_x: i32, delta_y: i32) void {
-        const border_width = 5;
-
         var output_width: i32 = math.maxInt(i32);
         var output_height: i32 = math.maxInt(i32);
         if (state.output) |output| {
             output.wlr_output.effectiveResolution(&output_width, &output_height);
         }
+
+        const border_width = 2;
 
         const max_x = output_width - state.box.width - border_width + @divFloor(state.box.width, 2);
         state.box.x += delta_x;
@@ -105,7 +105,7 @@ pub const ViewState = struct {
         var output_height: i32 = undefined;
         output.wlr_output.effectiveResolution(&output_width, &output_height);
 
-        const border_width = 5;
+        const border_width = 2;
         state.box.width = @min(state.box.width, output_width - (2 * border_width));
         state.box.height = @min(state.box.height, output_height - (2 * border_width));
 
@@ -125,7 +125,8 @@ pub const View = struct {
     saved_surface_tree: *wlr.SceneTree,
     /// Order is left, right, top, bottom
     borders: [4]*wlr.SceneRect,
-    border_color: [4]f32 = .{ 255, 0, 0, 1 },
+    border_color: [4]f32 = .{ 255, 255, 255, 0.2 },
+    border_width: u32 = 2,
     popup_tree: *wlr.SceneTree,
 
     /// Bounds on the width/height of the view, set by the toplevel/xwayland_view implementation.
@@ -218,7 +219,6 @@ pub const View = struct {
         view.tree.node.setEnabled(false);
         view.popup_tree.node.setEnabled(false);
         view.saved_surface_tree.node.setEnabled(false);
-
         try AxiomSceneNodeData.attach(&view.tree.node, .{ .view = view });
         try AxiomSceneNodeData.attach(&view.popup_tree.node, .{ .view = view });
 
@@ -274,8 +274,9 @@ pub const View = struct {
         // }
 
         // Resizing windows with touch or tablet tool is not yet supported.
-        switch (server.seat.cursor.cursor_mode) {
-            .passthrough => server.seat.cursor.startResize(view, edges),
+        // TODO: do this properly
+        switch (server.input_manager.defaultSeat().cursor.cursor_mode) {
+            .passthrough => server.input_manager.defaultSeat().cursor.startResize(view, edges),
             .move, .resize => {},
         }
     }
@@ -311,7 +312,8 @@ pub const View = struct {
         assert(view.inflight.resizing);
 
         const data = blk: {
-            const seat = server.seat;
+            // TODO: do this properly
+            const seat = server.input_manager.defaultSeat();
             const cursor = seat.cursor;
             if (cursor.inflight_mode == .resize and cursor.inflight_mode.resize.view == view) {
                 break :blk cursor.inflight_mode.resize;
@@ -439,7 +441,7 @@ pub const View = struct {
 
         {
             //const config = &server.config;
-            const border_width: c_int = 5;
+            const border_width: c_int = @intCast(view.border_width);
             const border_color = blk: {
                 if (view.current.urgent) break :blk view.border_color;
                 if (view.current.focus != 0) break :blk view.border_color;
@@ -706,7 +708,7 @@ pub const View = struct {
         //     view.pending.box.height = dimensions.height;
         // }
 
-        const output = server.seat.focused_output;
+        const output = server.input_manager.defaultSeat().focused_output;
 
         if (output) |o| {
             // Center the initial pending box on the output
@@ -724,7 +726,8 @@ pub const View = struct {
         if (output) |o| {
             view.setPendingOutput(o);
 
-            server.seat.focus(view);
+            var it = server.input_manager.seats.first;
+            while (it) |seat_node| : (it = seat_node.next) seat_node.data.focus(view);
         } else {
             std.log.debug("no output available for newly mapped view, adding to fallback stacks", .{});
 

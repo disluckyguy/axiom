@@ -245,9 +245,10 @@ pub const Root = struct {
 
         // If any seat has the removed output focused, focus the fallback one
 
-        const seat = root.server.seat;
-        if (seat.focused_output == output) {
-            seat.focusOutput(fallback_output);
+        var it = server.input_manager.seats.first;
+        while (it) |node| : (it = node.next) {
+            var seat = node.data;
+            seat.focusOutput(output);
         }
 
         //TODO: what does this do?
@@ -285,15 +286,19 @@ pub const Root = struct {
             log.debug("moving views from fallback stacks to new output", .{});
 
             output.pending.tags = root.transaction.fallback_state.tags;
-            // {
-            //     var it = root.fallback_state.wm_stack.safeIterator(.reverse);
-            //     while (it.next()) |view| view.setPendingOutput(output);
-            // }
+            {
+                var it = root.transaction.fallback_state.focus_stack.safeIterator(.reverse);
+                while (it.next()) |view| view.setPendingOutput(output);
+            }
             {
                 // Focus the new output with all seats
 
-                const seat = server.seat;
-                seat.focusOutput(output);
+                var it = server.input_manager.seats.first;
+                while (it) |seat_node| : (it = seat_node.next) {
+                    const seat = &seat_node.data;
+                    std.debug.print("focusing output \n", .{});
+                    seat.focusOutput(output);
+                }
             }
         } else {
             // Otherwise check if any views were previously evacuated from an output

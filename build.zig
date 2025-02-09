@@ -56,7 +56,7 @@ pub fn build(b: *std.Build) void {
     axiom.root_module.addImport("wayland", wayland);
     axiom.root_module.addImport("xkbcommon", xkbcommon);
     axiom.root_module.addImport("wlroots", wlroots);
-
+    axiom.linkSystemLibrary("libinput");
     axiom.linkSystemLibrary("wayland-server");
     axiom.linkSystemLibrary("xkbcommon");
     axiom.linkSystemLibrary("pixman-1");
@@ -81,7 +81,7 @@ pub fn build(b: *std.Build) void {
     axiom_check.root_module.addImport("wayland", wayland);
     axiom_check.root_module.addImport("xkbcommon", xkbcommon);
     axiom_check.root_module.addImport("wlroots", wlroots);
-
+    axiom_check.linkSystemLibrary("libinput");
     axiom_check.linkSystemLibrary("wayland-server");
     axiom_check.linkSystemLibrary("xkbcommon");
     axiom_check.linkSystemLibrary("pixman-1");

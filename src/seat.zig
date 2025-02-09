@@ -12,6 +12,8 @@ const axiom_xwayland = @import("xwayland.zig");
 const axiom_keyboard = @import("keyboard.zig");
 const axiom_cursor = @import("cursor.zig");
 const axiom_output = @import("output.zig");
+const axiom_input_relay = @import("input_relay.zig");
+const axiom_input_device = @import("input_device.zig");
 
 const server = &@import("main.zig").server;
 
@@ -39,7 +41,8 @@ pub const Seat = struct {
     seat: *wlr.Seat,
     request_set_selection: wl.Listener(*wlr.Seat.event.RequestSetSelection) = wl.Listener(*wlr.Seat.event.RequestSetSelection).init(requestSetSelection),
     keyboards: wl.list.Head(axiom_keyboard.Keyboard, .link) = undefined,
-    cursor: *axiom_cursor.Cursor,
+    cursor: axiom_cursor.Cursor,
+    relay: axiom_input_relay.InputRelay,
     focused: FocusTarget = .none,
     focused_output: ?*axiom_output.Output = null,
 
@@ -49,23 +52,22 @@ pub const Seat = struct {
     grab_box: wlr.Box = undefined,
     resize_edges: wlr.Edges = .{},
 
-    pub fn init(seat: *Seat) !void {
+    pub fn init(seat: *Seat, name: [*:0]const u8) !void {
         errdefer gpa.destroy(seat);
 
-        const wlr_seat = try wlr.Seat.create(server.wl_server, "default");
-
-        const cursor = try gpa.create(axiom_cursor.Cursor);
+        const wlr_seat = try wlr.Seat.create(server.wl_server, name);
 
         errdefer wlr_seat.destroy();
 
         seat.* = .{
             // This will be automatically destroyed when the display is destroyed
             .seat = wlr_seat,
-            .cursor = cursor,
-            //.relay = undefined,
+            .cursor = undefined,
+            .relay = undefined,
             //.mapping_repeat_timer = mapping_repeat_timer,
         };
-        server.xwayland.setSeat(server.seat.seat);
+
+        seat.relay.init();
         try seat.cursor.init(seat);
         seat.seat.data = @intFromPtr(seat);
         seat.keyboards.init();
@@ -90,6 +92,72 @@ pub const Seat = struct {
         // seat.start_drag.link.remove();
         // if (seat.drag != .none) seat.drag_destroy.link.remove();
         // seat.request_set_primary_selection.link.remove();
+    }
+
+    pub fn updateCapabilities(seat: *Seat) void {
+        // Currently a cursor is always drawn even if there are no pointer input devices.
+        // TODO Don't draw a cursor if there are no input devices.
+        var capabilities: wl.Seat.Capability = .{ .pointer = true };
+
+        var it = server.input_manager.devices.iterator(.forward);
+        while (it.next()) |device| {
+            if (device.seat == seat) {
+                switch (device.wlr_device.type) {
+                    .keyboard => capabilities.keyboard = true,
+                    .touch => capabilities.touch = true,
+                    .pointer, .@"switch", .tablet => {},
+                    .tablet_pad => unreachable,
+                }
+            }
+        }
+
+        seat.seat.setCapabilities(capabilities);
+    }
+
+    pub fn addDevice(seat: *Seat, wlr_device: *wlr.InputDevice) void {
+        seat.tryAddDevice(wlr_device) catch |err| switch (err) {
+            error.OutOfMemory => std.log.err("out of memory", .{}),
+            //TODO: finish
+            else => {},
+        };
+    }
+
+    fn tryAddDevice(seat: *Seat, wlr_device: *wlr.InputDevice) !void {
+        switch (wlr_device.type) {
+            .keyboard => {
+                const keyboard = try gpa.create(axiom_keyboard.Keyboard);
+                errdefer gpa.destroy(keyboard);
+
+                try keyboard.init(seat, wlr_device);
+
+                seat.seat.setKeyboard(keyboard.device.wlr_device.toKeyboard());
+                if (seat.seat.keyboard_state.focused_surface) |wlr_surface| {
+                    seat.keyboardNotifyEnter(wlr_surface);
+                }
+            },
+            .pointer, .touch => {
+                const device = try gpa.create(axiom_input_device.InputDevice);
+                errdefer gpa.destroy(device);
+
+                try device.init(seat, wlr_device);
+
+                seat.cursor.wlr_cursor.attachInputDevice(wlr_device);
+            },
+            // .tablet => {
+            //     try Tablet.create(seat, wlr_device);
+            //     seat.cursor.wlr_cursor.attachInputDevice(wlr_device);
+            // },
+            // .@"switch" => {
+            //     const switch_device = try util.gpa.create(Switch);
+            //     errdefer util.gpa.destroy(switch_device);
+
+            //     try switch_device.init(seat, wlr_device);
+            // },
+
+            // TODO Support these types of input devices.
+            //.tablet_pad => {},
+            else => {},
+        }
     }
 
     pub fn focus(seat: *Seat, _target: ?*axiom_view.View) void {
@@ -232,7 +300,7 @@ pub const Seat = struct {
         // }
 
         seat.keyboardEnterOrLeave(target_surface);
-        //seat.relay.focus(target_surface);
+        seat.relay.focus(target_surface);
 
         // if (target_surface) |surface| {
         //     const pointer_constraints = server.input_manager.pointer_constraints;
@@ -288,8 +356,8 @@ pub const Seat = struct {
     /// Assumes the modifier used for compositor keybinds is pressed
     /// Returns true if the key was handled
     pub fn handleKeybind(seat: *Seat, key: xkb.Keysym) bool {
-        //const server = seat.server;
         _ = seat;
+
         switch (@intFromEnum(key)) {
             // Exit the compositor
             xkb.Keysym.Escape => {
