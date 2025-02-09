@@ -7,11 +7,11 @@ Current goals:
 - [x] implement transaction section
 - [x] fix popup positioning
 - [ ] add fullscreen
-- [ ] add input manager
+- [x] add input manager
 - [ ] add layer shell
 - [ ] add lock surface
 - [ ] add clipboard
-- [ ] add tablet mode
+- [ ] add tablet support
 
 This compositor is inspired by and uses code from [river](https://codeberg.org/river/river)
 
