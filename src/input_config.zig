@@ -12,7 +12,7 @@ const c = @import("c.zig");
 const server = &@import("main.zig").server;
 const util = @import("utils.zig");
 
-const axiom_input_device = @import("input_device.zig");
+const InputDevice = @import("input_device.zig").InputDevice;
 //const Tablet = @import("Tablet.zig");
 
 pub const EventState = enum {
@@ -212,7 +212,7 @@ pub const ScrollButtonLock = enum {
 pub const MapToOutput = struct {
     output_name: ?[]const u8,
 
-    fn apply(map_to_output: MapToOutput, device: *axiom_input_device.InputDevice) void {
+    fn apply(map_to_output: MapToOutput, device: *InputDevice) void {
         const wlr_output = blk: {
             if (map_to_output.output_name) |name| {
                 var it = server.root.active_outputs.iterator(.forward);
@@ -251,7 +251,7 @@ pub const MapToOutput = struct {
 pub const ScrollFactor = struct {
     value: f32,
 
-    fn apply(scroll_factor: ScrollFactor, device: *axiom_input_device.InputDevice) void {
+    fn apply(scroll_factor: ScrollFactor, device: *InputDevice) void {
         device.config.scroll_factor = scroll_factor.value;
     }
 };
@@ -288,7 +288,7 @@ pub const InputConfig = struct {
         }
     }
 
-    pub fn apply(config: *const InputConfig, device: *axiom_input_device.InputDevice) void {
+    pub fn apply(config: *const InputConfig, device: *InputDevice) void {
         const libinput_device: *c.libinput_device = @ptrCast(device.wlr_device.getLibinputDevice() orelse return);
         log.debug("applying input configuration '{s}' to device '{s}'.", .{ config.glob, device.identifier });
 
