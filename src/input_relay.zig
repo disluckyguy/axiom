@@ -6,9 +6,9 @@ const wl = @import("wayland").server.wl;
 
 const util = @import("utils.zig");
 
-const axiom_text_input = @import("text_input.zig");
-const axiom_input_popup = @import("input_popup.zig");
-const axiom_seat = @import("seat.zig");
+const TextInput = @import("text_input.zig").TextInput;
+const InputPopup = @import("input_popup.zig").InputPopup;
+const Seat = @import("seat.zig").Seat;
 
 const log = std.log;
 
@@ -16,17 +16,17 @@ const log = std.log;
 /// Multiple text input objects may be created per seat, even multiple from the same client.
 /// However, only one text input per seat may be enabled at a time.
 pub const InputRelay = struct {
-    text_inputs: wl.list.Head(axiom_text_input.TextInput, .link),
+    text_inputs: wl.list.Head(TextInput, .link),
 
     /// The input method currently in use for this seat.
     /// Only one input method per seat may be used at a time and if one is
     /// already in use new input methods are ignored.
     /// If this is null, no text input enter events will be sent.
     input_method: ?*wlr.InputMethodV2 = null,
-    input_popups: wl.list.Head(axiom_input_popup.InputPopup, .link),
+    input_popups: wl.list.Head(InputPopup, .link),
     /// The currently enabled text input for the currently focused surface.
     /// Always null if there is no input method.
-    text_input: ?*axiom_text_input.TextInput = null,
+    text_input: ?*TextInput = null,
 
     input_method_commit: wl.Listener(*wlr.InputMethodV2) =
         wl.Listener(*wlr.InputMethodV2).init(handleInputMethodCommit),
@@ -48,13 +48,13 @@ pub const InputRelay = struct {
     }
 
     pub fn newInputMethod(relay: *InputRelay, input_method: *wlr.InputMethodV2) void {
-        const seat: *axiom_seat.Seat = @fieldParentPtr("relay", relay);
+        const seat: *Seat = @fieldParentPtr("relay", relay);
 
-        log.debug("new input method on seat {s}", .{seat.seat.name});
+        log.debug("new input method on seat {s}", .{seat.wlr_seat.name});
 
         // Only one input_method can be bound to a seat.
         if (relay.input_method != null) {
-            log.info("seat {s} already has an input method", .{seat.seat.name});
+            log.info("seat {s} already has an input method", .{seat.wlr_seat.name});
             input_method.sendUnavailable();
             return;
         }
@@ -128,9 +128,9 @@ pub const InputRelay = struct {
         keyboard_grab: *wlr.InputMethodV2.KeyboardGrab,
     ) void {
         const relay: *InputRelay = @fieldParentPtr("grab_keyboard", listener);
-        const seat: *axiom_seat.Seat = @fieldParentPtr("relay", relay);
+        const seat: *Seat = @fieldParentPtr("relay", relay);
 
-        const active_keyboard = seat.seat.getKeyboard();
+        const active_keyboard = seat.wlr_seat.getKeyboard();
         keyboard_grab.setKeyboard(active_keyboard);
 
         keyboard_grab.events.destroy.add(&relay.grab_keyboard_destroy);
@@ -142,7 +142,7 @@ pub const InputRelay = struct {
     ) void {
         const relay: *InputRelay = @fieldParentPtr("input_method_new_popup", listener);
 
-        axiom_input_popup.InputPopup.create(wlr_popup, relay) catch {
+        InputPopup.create(wlr_popup, relay) catch {
             log.err("out of memory", .{});
             return;
         };

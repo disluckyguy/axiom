@@ -6,17 +6,17 @@ const wl = @import("wayland").server.wl;
 
 const c = @import("c.zig");
 const server = &@import("main.zig").server;
-const util = @import("utils.zig");
+const utils = @import("utils.zig");
 
-const axiom_seat = @import("seat.zig");
-const axiom_keyboard = @import("keyboard.zig");
+const Seat = @import("seat.zig").Seat;
+const Keyboard = @import("keyboard.zig").Keyboard;
 //const Switch = @import("Switch.zig");
 //const Tablet = @import("Tablet.zig");
 
 const log = std.log;
 
 pub const InputDevice = struct {
-    seat: *axiom_seat.Seat,
+    seat: *Seat,
     wlr_device: *wlr.InputDevice,
 
     destroy: wl.Listener(*wlr.InputDevice) = wl.Listener(*wlr.InputDevice).init(handleDestroy),
@@ -33,7 +33,7 @@ pub const InputDevice = struct {
     /// InputManager.devices
     link: wl.list.Link,
 
-    pub fn init(device: *InputDevice, seat: *axiom_seat.Seat, wlr_device: *wlr.InputDevice) !void {
+    pub fn init(device: *InputDevice, seat: *Seat, wlr_device: *wlr.InputDevice) !void {
         var vendor: c_uint = 0;
         var product: c_uint = 0;
 
@@ -43,7 +43,7 @@ pub const InputDevice = struct {
         }
 
         const identifier = try std.fmt.allocPrint(
-            util.gpa,
+            utils.gpa,
             "{s}-{}-{}-{s}",
             .{
                 @tagName(wlr_device.type),
@@ -52,7 +52,7 @@ pub const InputDevice = struct {
                 mem.trim(u8, mem.sliceTo(wlr_device.name orelse "unknown", 0), &ascii.whitespace),
             },
         );
-        errdefer util.gpa.free(identifier);
+        errdefer utils.gpa.free(identifier);
 
         for (identifier) |*char| {
             if (!ascii.isPrint(char.*) or ascii.isWhitespace(char.*)) {
@@ -91,7 +91,7 @@ pub const InputDevice = struct {
     pub fn deinit(device: *InputDevice) void {
         device.destroy.link.remove();
 
-        util.gpa.free(device.identifier);
+        utils.gpa.free(device.identifier);
 
         if (!isKeyboardGroup(device.wlr_device)) {
             device.link.remove();
@@ -115,13 +115,13 @@ pub const InputDevice = struct {
 
         switch (device.wlr_device.type) {
             .keyboard => {
-                const keyboard: *axiom_keyboard.Keyboard = @fieldParentPtr("device", device);
+                const keyboard: *Keyboard = @fieldParentPtr("device", device);
                 keyboard.deinit();
-                util.gpa.destroy(keyboard);
+                utils.gpa.destroy(keyboard);
             },
             .pointer, .touch => {
                 device.deinit();
-                util.gpa.destroy(device);
+                utils.gpa.destroy(device);
             },
             // .tablet => {
             //     const tablet: *Tablet = @fieldParentPtr("device", device);
@@ -130,7 +130,7 @@ pub const InputDevice = struct {
             // .@"switch" => {
             //     const switch_device: *Switch = @fieldParentPtr("device", device);
             //     switch_device.deinit();
-            //     util.gpa.destroy(switch_device);
+            //     utils.gpa.destroy(switch_device);
             // },
             //.tablet_pad => unreachable,
             else => {},

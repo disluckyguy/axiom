@@ -14,6 +14,7 @@ const axiom_cursor = @import("cursor.zig");
 const axiom_output = @import("output.zig");
 const axiom_input_relay = @import("input_relay.zig");
 const axiom_input_device = @import("input_device.zig");
+const SceneNodeData = @import("scene_node_data.zig").SceneNodeData;
 
 const server = &@import("main.zig").server;
 
@@ -38,7 +39,7 @@ pub const FocusTarget = union(enum) {
 };
 
 pub const Seat = struct {
-    seat: *wlr.Seat,
+    wlr_seat: *wlr.Seat,
     request_set_selection: wl.Listener(*wlr.Seat.event.RequestSetSelection) = wl.Listener(*wlr.Seat.event.RequestSetSelection).init(requestSetSelection),
     keyboards: wl.list.Head(axiom_keyboard.Keyboard, .link) = undefined,
     cursor: axiom_cursor.Cursor,
@@ -61,7 +62,7 @@ pub const Seat = struct {
 
         seat.* = .{
             // This will be automatically destroyed when the display is destroyed
-            .seat = wlr_seat,
+            .wlr_seat = wlr_seat,
             .cursor = undefined,
             .relay = undefined,
             //.mapping_repeat_timer = mapping_repeat_timer,
@@ -69,18 +70,17 @@ pub const Seat = struct {
 
         seat.relay.init();
         try seat.cursor.init(seat);
-        seat.seat.data = @intFromPtr(seat);
+        seat.wlr_seat.data = @intFromPtr(seat);
         seat.keyboards.init();
     }
 
     pub fn deinit(seat: *Seat) void {
-        _ = seat;
         // {
         //     var it = server.input_manager.devices.iterator(.forward);
         //     while (it.next()) |device| assert(device.seat != seat);
         // }
 
-        // seat.cursor.deinit();
+        seat.cursor.deinit();
         // seat.mapping_repeat_timer.remove();
 
         // while (seat.keyboard_groups.first) |node| {
@@ -111,7 +111,7 @@ pub const Seat = struct {
             }
         }
 
-        seat.seat.setCapabilities(capabilities);
+        seat.wlr_seat.setCapabilities(capabilities);
     }
 
     pub fn addDevice(seat: *Seat, wlr_device: *wlr.InputDevice) void {
@@ -130,8 +130,8 @@ pub const Seat = struct {
 
                 try keyboard.init(seat, wlr_device);
 
-                seat.seat.setKeyboard(keyboard.device.wlr_device.toKeyboard());
-                if (seat.seat.keyboard_state.focused_surface) |wlr_surface| {
+                seat.wlr_seat.setKeyboard(keyboard.device.wlr_device.toKeyboard());
+                if (seat.wlr_seat.keyboard_state.focused_surface) |wlr_surface| {
                     seat.keyboardNotifyEnter(wlr_surface);
                 }
             },
@@ -161,7 +161,7 @@ pub const Seat = struct {
     }
 
     pub fn notifyActivity(seat: Seat) void {
-        server.input_manager.idle_notifier.notifyActivity(seat.seat);
+        server.input_manager.idle_notifier.notifyActivity(seat.wlr_seat);
     }
 
     pub fn focus(seat: *Seat, _target: ?*axiom_view.View) void {
@@ -293,30 +293,30 @@ pub const Seat = struct {
         }
         seat.focused = new_focus;
 
-        // if (seat.cursor.constraint) |constraint| {
-        //     if (constraint.wlr_constraint.surface != target_surface) {
-        //         if (constraint.state == .active) {
-        //             std.log.info("deactivating pointer constraint for surface, keyboard focus lost", .{});
-        //             constraint.deactivate();
-        //         }
-        //         seat.cursor.constraint = null;
-        //     }
-        // }
+        if (seat.cursor.constraint) |constraint| {
+            if (constraint.wlr_constraint.surface != target_surface) {
+                if (constraint.state == .active) {
+                    std.log.info("deactivating pointer constraint for surface, keyboard focus lost", .{});
+                    constraint.deactivate();
+                }
+                seat.cursor.constraint = null;
+            }
+        }
 
         seat.keyboardEnterOrLeave(target_surface);
         seat.relay.focus(target_surface);
 
-        // if (target_surface) |surface| {
-        //     const pointer_constraints = server.input_manager.pointer_constraints;
-        //     if (pointer_constraints.constraintForSurface(surface, seat.wlr_seat)) |wlr_constraint| {
-        //         if (seat.cursor.constraint) |constraint| {
-        //             std.debug.assert(constraint.wlr_constraint == wlr_constraint);
-        //         } else {
-        //             seat.cursor.constraint = @ptrFromInt(wlr_constraint.data);
-        //             std.debug.assert(seat.cursor.constraint != null);
-        //         }
-        //     }
-        // }
+        if (target_surface) |surface| {
+            const pointer_constraints = server.input_manager.pointer_constraints;
+            if (pointer_constraints.constraintForSurface(surface, seat.wlr_seat)) |wlr_constraint| {
+                if (seat.cursor.constraint) |constraint| {
+                    std.debug.assert(constraint.wlr_constraint == wlr_constraint);
+                } else {
+                    seat.cursor.constraint = @ptrFromInt(wlr_constraint.data);
+                    std.debug.assert(seat.cursor.constraint != null);
+                }
+            }
+        }
 
         // // Depending on configuration and cursor position, changing keyboard focus
         // // may cause the cursor to be warped.
@@ -331,21 +331,21 @@ pub const Seat = struct {
         if (target_surface) |wlr_surface| {
             seat.keyboardNotifyEnter(wlr_surface);
         } else {
-            seat.seat.keyboardNotifyClearFocus();
+            seat.wlr_seat.keyboardNotifyClearFocus();
         }
     }
 
     fn keyboardNotifyEnter(seat: *Seat, wlr_surface: *wlr.Surface) void {
-        if (seat.seat.getKeyboard()) |wlr_keyboard| {
+        if (seat.wlr_seat.getKeyboard()) |wlr_keyboard| {
             //const keyboard: *axiom_keyboard.Keyboard = @ptrFromInt(wlr_keyboard.data);
 
-            seat.seat.keyboardNotifyEnter(
+            seat.wlr_seat.keyboardNotifyEnter(
                 wlr_surface,
                 wlr_keyboard.keycodes[0..wlr_keyboard.num_keycodes],
                 &wlr_keyboard.modifiers,
             );
         } else {
-            seat.seat.keyboardNotifyEnter(wlr_surface, &.{}, null);
+            seat.wlr_seat.keyboardNotifyEnter(wlr_surface, &.{}, null);
         }
     }
 
@@ -354,32 +354,59 @@ pub const Seat = struct {
         event: *wlr.Seat.event.RequestSetSelection,
     ) void {
         const seat: *Seat = @fieldParentPtr("request_set_selection", listener);
-        seat.seat.setSelection(event.source, event.serial);
+        seat.wlr_seat.setSelection(event.source, event.serial);
     }
 
     /// Assumes the modifier used for compositor keybinds is pressed
     /// Returns true if the key was handled
     pub fn handleKeybind(seat: *Seat, key: xkb.Keysym) bool {
-        _ = seat;
-
+        //_ = seat;
         switch (@intFromEnum(key)) {
             // Exit the compositor
             xkb.Keysym.Escape => {
                 server.wl_server.terminate();
+                server.deinit();
+            },
+
+            xkb.Keysym.F1 => {
+                const focused = seat.focused;
+
+                if (focused != .view) {
+                    return false;
+                }
+
+                const focused_view = focused.view;
+
+                if (server.input_manager.defaultSeat().focused_output) |output| {
+                    for (output.views.items, 0..) |value, i| {
+                        if (value == focused_view) {
+                            if (i + 1 == output.views.items.len) {
+                                seat.focus(output.views.items[0]);
+                                //return true;
+                            } else {
+                                seat.focus(output.views.items[i + 1]);
+                                //return true;
+                            }
+                        }
+                    }
+                }
+
+                server.root.transaction.applyPending();
+
+                return true;
             },
 
             xkb.Keysym.F2 => {
                 var env_map = std.process.getEnvMap(gpa) catch return false;
                 defer env_map.deinit();
-                var process = std.process.Child.init(
-                    &[_][]const u8{"konsole"},
-                    gpa,
-                );
+
+                std.debug.print("running process \n", .{});
+                var process = std.process.Child.init(&[_][]const u8{ "bash", "-c", "\"konsole\"" }, gpa);
 
                 process.env_map = &env_map;
 
                 process.spawn() catch return false;
-
+                std.debug.print("ran process \n", .{});
                 return true;
             },
 

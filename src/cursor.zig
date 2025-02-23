@@ -12,6 +12,7 @@ const View = @import("view.zig").View;
 const Seat = @import("seat.zig").Seat;
 const Root = @import("root.zig").Root;
 const Output = @import("output.zig").Output;
+const PointerConstraint = @import("pointer_constraint.zig").PointerConstraint;
 
 const gpa = @import("utils.zig").gpa;
 const server = &@import("main.zig").server;
@@ -88,6 +89,8 @@ pub const Cursor = struct {
     // Hashmap of all the current touchpoint in layout coordinates
     touch_points: std.AutoHashMapUnmanaged(i32, LayoutPoint) = .{},
 
+    constraint: ?*PointerConstraint = null,
+
     pub fn init(cursor: *Cursor, seat: *Seat) !void {
         const wlr_cursor = try wlr.Cursor.create();
         errdefer wlr_cursor.destroy();
@@ -117,11 +120,10 @@ pub const Cursor = struct {
         wlr_cursor.events.frame.add(&cursor.cursor_frame);
         wlr_cursor.events.motion_absolute.add(&cursor.cursor_motion_absolute);
         wlr_cursor.events.motion.add(&cursor.cursor_motion);
-        seat.seat.events.request_set_cursor.add(&cursor.request_set_cursor);
+        seat.wlr_seat.events.request_set_cursor.add(&cursor.request_set_cursor);
     }
 
     pub fn deinit(cursor: *Cursor) void {
-        cursor.hide_cursor_timer.remove();
         cursor.xcursor_manager.destroy();
         cursor.wlr_cursor.destroy();
     }
@@ -168,7 +170,7 @@ pub const Cursor = struct {
 
     fn handleClearFocus(cursor: *Cursor) void {
         cursor.setXcursor("default");
-        cursor.seat.seat.pointerNotifyClearFocus();
+        cursor.seat.wlr_seat.pointerNotifyClearFocus();
     }
 
     pub fn handleRequestSetCursor(
@@ -177,7 +179,7 @@ pub const Cursor = struct {
     ) void {
         const cursor: *Cursor = @fieldParentPtr("request_set_cursor", listener);
         const seat = cursor.seat;
-        if (event.seat_client == seat.seat.pointer_state.focused_client)
+        if (event.seat_client == seat.wlr_seat.pointer_state.focused_client)
             seat.cursor.wlr_cursor.setSurface(event.surface, event.hotspot_x, event.hotspot_y);
     }
 
@@ -237,7 +239,7 @@ pub const Cursor = struct {
                     .passthrough => unreachable,
                     // .down => {
                     //     // If we were in down mode, we need pass along the release event
-                    //     _ = cursor.seat.seat.pointerNotifyButton(event.time_msec, event.button, event.state);
+                    //     _ = cursor.seat.wlr_seat.pointerNotifyButton(event.time_msec, event.button, event.state);
                     // },
                     .move => {},
                     .resize => |data| data.view.pending.resizing = false,
@@ -248,7 +250,7 @@ pub const Cursor = struct {
 
                 server.root.transaction.applyPending();
             } else {
-                _ = cursor.seat.seat.pointerNotifyButton(event.time_msec, event.button, event.state);
+                _ = cursor.seat.wlr_seat.pointerNotifyButton(event.time_msec, event.button, event.state);
             }
             return;
         }
@@ -257,14 +259,14 @@ pub const Cursor = struct {
         cursor.pressed_count += 1;
 
         if (cursor.pressed_count > 1) {
-            _ = cursor.seat.seat.pointerNotifyButton(event.time_msec, event.button, event.state);
+            _ = cursor.seat.wlr_seat.pointerNotifyButton(event.time_msec, event.button, event.state);
             return;
         }
 
         if (server.root.at(cursor.wlr_cursor.x, cursor.wlr_cursor.y)) |result| {
             cursor.updateKeyboardFocus(result);
 
-            _ = cursor.seat.seat.pointerNotifyButton(event.time_msec, event.button, event.state);
+            _ = cursor.seat.wlr_seat.pointerNotifyButton(event.time_msec, event.button, event.state);
         } else {
             cursor.updateOutputFocus(cursor.wlr_cursor.x, cursor.wlr_cursor.y);
         }
@@ -366,20 +368,13 @@ pub const Cursor = struct {
 
         cursor.seat.focus(view);
 
-        // if (view.current.output.?.layout != null) {
-        //     view.float_box = view.current.box;
-        //     view.pending.float = true;
-        // }
-
-        cursor.seat.seat.pointerNotifyClearFocus();
+        cursor.seat.wlr_seat.pointerNotifyClearFocus();
         cursor.setXcursor(xcursor_name);
 
         server.root.transaction.applyPending();
     }
 
     fn processMotion(cursor: *Cursor, device: *wlr.InputDevice, time: u32, delta_x: f64, delta_y: f64, unaccel_dx: f64, unaccel_dy: f64) void {
-        //const server = cursor.server;
-
         _ = unaccel_dx;
         _ = unaccel_dy;
 
@@ -395,16 +390,14 @@ pub const Cursor = struct {
         var dx: f64 = delta_x;
         var dy: f64 = delta_y;
 
-        // if (cursor.constraint) |constraint| {
-        //     if (constraint.state == .active) {
-        //         switch (constraint.wlr_constraint.type) {
-        //             .locked => return,
-        //             .confined => constraint.confine(&dx, &dy),
-        //         }
-        //     }
-        // }
-
-        std.log.info("Cursor Mode: {s}", .{@tagName(cursor.current_mode)});
+        if (cursor.constraint) |constraint| {
+            if (constraint.state == .active) {
+                switch (constraint.wlr_constraint.type) {
+                    .locked => return,
+                    .confined => constraint.confine(&dx, &dy),
+                }
+            }
+        }
 
         switch (cursor.current_mode) {
             // TODO: add down
@@ -500,8 +493,8 @@ pub const Cursor = struct {
         std.debug.assert(cursor.current_mode == .passthrough);
         if (server.root.at(cursor.wlr_cursor.x, cursor.wlr_cursor.y)) |result| {
             if (result.surface) |surface| {
-                cursor.seat.seat.pointerNotifyEnter(surface, result.sx, result.sy);
-                cursor.seat.seat.pointerNotifyMotion(time, result.sx, result.sy);
+                cursor.seat.wlr_seat.pointerNotifyEnter(surface, result.sx, result.sy);
+                cursor.seat.wlr_seat.pointerNotifyMotion(time, result.sx, result.sy);
                 return;
             }
         }
@@ -515,7 +508,7 @@ pub const Cursor = struct {
     ) void {
         const cursor: *Cursor = @fieldParentPtr("cursor_axis", listener);
 
-        cursor.seat.seat.pointerNotifyAxis(
+        cursor.seat.wlr_seat.pointerNotifyAxis(
             event.time_msec,
             event.orientation,
             event.delta,
@@ -527,7 +520,7 @@ pub const Cursor = struct {
 
     pub fn handleCursorFrame(listener: *wl.Listener(*wlr.Cursor), _: *wlr.Cursor) void {
         const cursor: *Cursor = @fieldParentPtr("cursor_frame", listener);
-        cursor.seat.seat.pointerNotifyFrame();
+        cursor.seat.wlr_seat.pointerNotifyFrame();
     }
 
     fn updateKeyboardFocus(cursor: Cursor, result: Root.AtResult) void {

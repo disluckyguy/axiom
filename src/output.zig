@@ -6,21 +6,21 @@ const xkb = @import("xkbcommon");
 const pixman = @import("pixman");
 
 const wlr = @import("wlroots");
-const axiom_server = @import("server.zig");
-const axiom_view = @import("view.zig");
-const axiom_root = @import("root.zig");
+const Server = @import("server.zig").Server;
+const View = @import("view.zig").View;
+const Root = @import("root.zig").Root;
+
 const gpa = @import("utils.zig").gpa;
 
 const server = &@import("main.zig").server;
 
 pub const PendingState = struct {
     tags: u32 = 1 << 0,
-    focus_stack: wl.list.Head(axiom_view.View, .pending_focus_stack_link),
-    //wm_stack: wl.list.Head(axiom_view.View, .pending_wm_stack_link),
+    focus_stack: wl.list.Head(View, .pending_focus_stack_link),
 };
 
 pub const Output = struct {
-    server: *axiom_server.Server,
+    server: *Server,
     wlr_output: *wlr.Output,
     scene_output: *wlr.SceneOutput,
 
@@ -46,22 +46,22 @@ pub const Output = struct {
 
     inflight: struct {
         tags: u32 = 1 << 0,
-        focus_stack: wl.list.Head(axiom_view.View, .inflight_focus_stack_link),
-        //wm_stack: wl.list.Head(axiom_view.View, .inflight_wm_stack_link),
-        fullscreen: ?*axiom_view.View = null,
-        // layout_demand: ?LayoutDemand = null,
+        focus_stack: wl.list.Head(View, .inflight_focus_stack_link),
+        fullscreen: ?*View = null,
     },
 
     current: struct {
         tags: u32 = 1 << 0,
-        fullscreen: ?*axiom_view.View = null,
+        fullscreen: ?*View = null,
     } = .{},
 
     previous_tags: u32 = 1 << 0,
 
+    views: std.ArrayList(*View) = std.ArrayList(*View).init(gpa),
+
     frame: wl.Listener(*wlr.Output) = wl.Listener(*wlr.Output).init(frame),
     request_state: wl.Listener(*wlr.Output.event.RequestState) =
-        wl.Listener(*wlr.Output.event.RequestState).init(request_state),
+        wl.Listener(*wlr.Output.event.RequestState).init(handleRequestState),
     destroy: wl.Listener(*wlr.Output) = wl.Listener(*wlr.Output).init(destroy),
     present: wl.Listener(*wlr.Output.event.Present) = wl.Listener(*wlr.Output.event.Present).init(handlePresent),
 
@@ -142,11 +142,9 @@ pub const Output = struct {
             },
             .pending = .{
                 .focus_stack = undefined,
-                //.wm_stack = undefined,
             },
             .inflight = .{
                 .focus_stack = undefined,
-                //.wm_stack = undefined,
             },
             .usable_box = .{
                 .x = 0,
@@ -158,11 +156,7 @@ pub const Output = struct {
         wlr_output.data = @intFromPtr(output);
 
         output.pending.focus_stack.init();
-        //.pending.wm_stack.init();
         output.inflight.focus_stack.init();
-        //output.inflight.wm_stack.init();
-
-        //output.status.init();
 
         _ = try output.layers.fullscreen.createSceneRect(width, height, &[_]f32{ 0, 0, 0, 1.0 });
         output.layers.fullscreen.node.setEnabled(false);
@@ -172,7 +166,6 @@ pub const Output = struct {
         wlr_output.events.frame.add(&output.frame);
         wlr_output.events.present.add(&output.present);
 
-        //server.input_manager.defaultSeat().focused_output = output;
         output.enableDisable();
     }
 
@@ -224,7 +217,7 @@ pub const Output = struct {
             if (!wlr.GammaControlV1.apply(control, &state)) return error.OutOfMemory;
 
             if (!output.wlr_output.testState(&state) or output.wlr_output.isHeadless()) {
-                //    wlr.GammaControlV1.sendFailedAndDestroy(control);
+                wlr.GammaControlV1.sendFailedAndDestroy(control);
                 state.clearGammaLut();
                 state.committed.gamma_lut = false;
             }
@@ -301,7 +294,7 @@ pub const Output = struct {
         }
     }
 
-    pub fn request_state(
+    pub fn handleRequestState(
         listener: *wl.Listener(*wlr.Output.event.RequestState),
         event: *wlr.Output.event.RequestState,
     ) void {

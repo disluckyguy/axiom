@@ -4,23 +4,24 @@ const wl = @import("wayland").server.wl;
 
 const gpa = @import("utils.zig").gpa;
 
-const axiom_view = @import("view.zig");
-const axiom_xwayland = @import("xwayland.zig");
+const View = @import("view.zig").View;
+const XwaylandView = @import("xwayland.zig").XwaylandView;
+const XwaylandOverrideRedirect = @import("xwayland.zig").XwaylandOverrideRedirect;
 
-pub const Data = union(enum) {
-    view: *axiom_view.View,
+pub const SceneData = union(enum) {
+    view: *View,
     // TODO: implement lock and layer surface
     // lock_surface: *LockSurface,
     // layer_surface: *LayerSurface,
-    override_redirect: *axiom_xwayland.XwaylandOverrideRedirect,
+    override_redirect: *XwaylandOverrideRedirect,
 };
 
 pub const SceneNodeData = struct {
     node: *wlr.SceneNode,
-    data: Data,
+    data: SceneData,
     destroy: wl.Listener(void) = wl.Listener(void).init(handleDestroy),
 
-    pub fn attach(node: *wlr.SceneNode, data: Data) error{OutOfMemory}!void {
+    pub fn attach(node: *wlr.SceneNode, data: SceneData) error{OutOfMemory}!void {
         const scene_node_data = try gpa.create(SceneNodeData);
 
         scene_node_data.* = .{

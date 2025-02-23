@@ -17,6 +17,7 @@ const axiom_root = @import("root.zig");
 const axiom_view = @import("view.zig");
 const axiom_seat = @import("seat.zig");
 const axiom_input_manager = @import("input_manager.zig");
+const IpcSocket = @import("ipc/ipc.zig").IpcSocket;
 const gpa = @import("utils.zig").gpa;
 
 pub const Server = struct {
@@ -44,6 +45,8 @@ pub const Server = struct {
     xwayland_ready: wl.Listener(void) = wl.Listener(void).init(xwaylandReady),
     new_xwayland_surface: wl.Listener(*wlr.XwaylandSurface) = wl.Listener(*wlr.XwaylandSurface).init(newXwaylandSurface),
 
+    ipc_server: *IpcSocket,
+
     pub fn start(server: Server) !void {
         var buf: [11]u8 = undefined;
         const socket = try server.wl_server.addSocketAuto(&buf);
@@ -67,7 +70,8 @@ pub const Server = struct {
         const input_manager = try gpa.create(axiom_input_manager.InputManager);
         errdefer gpa.destroy(input_manager);
 
-        //const seat = try gpa.create(axiom_seat.Seat);
+        const ipc_server = try gpa.create(IpcSocket);
+        errdefer gpa.destroy(ipc_server);
 
         server.* = .{
             .wl_server = wl_server,
@@ -80,8 +84,8 @@ pub const Server = struct {
             .root = root,
             .input_manager = input_manager,
             .xdg_shell = try wlr.XdgShell.create(wl_server, 2),
-            //.seat = seat,
             .xwayland = undefined,
+            .ipc_server = ipc_server,
         };
 
         try server.root.init();
@@ -108,7 +112,7 @@ pub const Server = struct {
         try server.input_manager.init();
         server.xwayland.events.new_surface.add(&server.new_xwayland_surface);
 
-        //server.backend.events.new_input.add(&server.new_input);
+        try server.ipc_server.init();
     }
 
     pub fn deinit(server: *Server) void {
@@ -116,24 +120,8 @@ pub const Server = struct {
         server.xwayland.destroy();
         server.wl_server.destroy();
         server.input_manager.deinit();
+        server.ipc_server.deinit();
     }
-
-    // pub fn newInput(listener: *wl.Listener(*wlr.InputDevice), device: *wlr.InputDevice) void {
-    //     const server: *Server = @fieldParentPtr("new_input", listener);
-    //     switch (device.type) {
-    //         .keyboard => axiom_keyboard.Keyboard.create(server, device) catch |err| {
-    //             std.log.err("failed to create keyboard: {}", .{err});
-    //             return;
-    //         },
-    //         .pointer => server.seat.cursor.wlr_cursor.attachInputDevice(device),
-    //         else => {},
-    //     }
-
-    //     server.seat.seat.setCapabilities(.{
-    //         .pointer = true,
-    //         .keyboard = server.seat.keyboards.length() > 0,
-    //     });
-    // }
 
     pub fn newXdgToplevel(_: *wl.Listener(*wlr.XdgToplevel), xdg_toplevel: *wlr.XdgToplevel) void {
         axiom_toplevel.Toplevel.create(xdg_toplevel) catch {

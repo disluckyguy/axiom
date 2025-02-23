@@ -6,12 +6,12 @@ const wl = @import("wayland").server.wl;
 const server = &@import("main.zig").server;
 const util = @import("utils.zig");
 
-const axiom_input_relay = @import("input_relay.zig");
-const AxiomSceneNodeData = @import("scene_node_data.zig").SceneNodeData;
+const InputRelay = @import("input_relay.zig").InputRelay;
+const SceneNodeData = @import("scene_node_data.zig").SceneNodeData;
 
 pub const InputPopup = struct {
     link: wl.list.Link,
-    input_relay: *axiom_input_relay.InputRelay,
+    input_relay: *InputRelay,
 
     wlr_popup: *wlr.InputPopupSurfaceV2,
     surface_tree: *wlr.SceneTree,
@@ -21,28 +21,25 @@ pub const InputPopup = struct {
     unmap: wl.Listener(void) = wl.Listener(void).init(handleUnmap),
     commit: wl.Listener(*wlr.Surface) = wl.Listener(*wlr.Surface).init(handleCommit),
 
-    pub fn create(wlr_popup: *wlr.InputPopupSurfaceV2, input_relay: *axiom_input_relay.InputRelay) !void {
+    pub fn create(wlr_popup: *wlr.InputPopupSurfaceV2, input_relay: *InputRelay) !void {
         const input_popup = try util.gpa.create(InputPopup);
         errdefer util.gpa.destroy(input_popup);
 
-        _ = wlr_popup;
-        _ = input_relay;
+        input_popup.* = .{
+            .link = undefined,
+            .input_relay = input_relay,
+            .wlr_popup = wlr_popup,
+            .surface_tree = try server.root.transaction.hidden.tree.createSceneSubsurfaceTree(wlr_popup.surface),
+        };
 
-        // input_popup.* = .{
-        //     .link = undefined,
-        //     .input_relay = input_relay,
-        //     .wlr_popup = wlr_popup,
-        //     .surface_tree = try server.root.hidden.tree.createSceneSubsurfaceTree(wlr_popup.surface),
-        // };
+        input_relay.input_popups.append(input_popup);
 
-        // input_relay.input_popups.append(input_popup);
+        input_popup.wlr_popup.events.destroy.add(&input_popup.destroy);
+        input_popup.wlr_popup.surface.events.map.add(&input_popup.map);
+        input_popup.wlr_popup.surface.events.unmap.add(&input_popup.unmap);
+        input_popup.wlr_popup.surface.events.commit.add(&input_popup.commit);
 
-        // input_popup.wlr_popup.events.destroy.add(&input_popup.destroy);
-        // input_popup.wlr_popup.surface.events.map.add(&input_popup.map);
-        // input_popup.wlr_popup.surface.events.unmap.add(&input_popup.unmap);
-        // input_popup.wlr_popup.surface.events.commit.add(&input_popup.commit);
-
-        // input_popup.update();
+        input_popup.update();
     }
 
     fn handleDestroy(listener: *wl.Listener(void)) void {
@@ -67,7 +64,7 @@ pub const InputPopup = struct {
     fn handleUnmap(listener: *wl.Listener(void)) void {
         const input_popup: *InputPopup = @fieldParentPtr("unmap", listener);
 
-        input_popup.surface_tree.node.reparent(server.root.hidden.tree);
+        input_popup.surface_tree.node.reparent(server.root.transaction.hidden.tree);
     }
 
     fn handleCommit(listener: *wl.Listener(*wlr.Surface), _: *wlr.Surface) void {
@@ -90,7 +87,7 @@ pub const InputPopup = struct {
         // Focus should never be sent to subsurfaces
         assert(focused_surface.getRootSurface() == focused_surface);
 
-        const focused = AxiomSceneNodeData.fromSurface(focused_surface) orelse return;
+        const focused = SceneNodeData.fromSurface(focused_surface) orelse return;
 
         const output = switch (focused.data) {
             .view => |view| view.current.output orelse return,

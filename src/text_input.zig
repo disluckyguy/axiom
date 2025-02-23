@@ -28,7 +28,7 @@ pub const TextInput = struct {
 
         const text_input = try util.gpa.create(TextInput);
 
-        log.debug("new text input on seat {s}", .{seat.seat.name});
+        log.debug("new text input on seat {s}", .{seat.wlr_seat.name});
 
         text_input.* = .{
             .link = undefined,

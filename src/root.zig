@@ -16,7 +16,7 @@ const axiom_keyboard = @import("keyboard.zig");
 const axiom_cursor = @import("cursor.zig");
 const axiom_output = @import("output.zig");
 const AxiomSceneNodeData = @import("scene_node_data.zig").SceneNodeData;
-const AxiomData = @import("scene_node_data.zig").Data;
+const AxiomData = @import("scene_node_data.zig").SceneData;
 
 const gpa = @import("utils.zig").gpa;
 
@@ -196,9 +196,6 @@ pub const Root = struct {
                 view.inflight_focus_stack_link.remove();
                 view.inflight_focus_stack_link.init();
 
-                //view.inflight_wm_stack_link.remove();
-                //view.inflight_wm_stack_link.init();
-
                 if (view.inflight_transaction) {
                     view.commitTransaction();
                 }
@@ -244,24 +241,13 @@ pub const Root = struct {
         // }
 
         // If any seat has the removed output focused, focus the fallback one
-
         var it = server.input_manager.seats.first;
         while (it) |node| : (it = node.next) {
             var seat = node.data;
             seat.focusOutput(output);
         }
 
-        //TODO: what does this do?
-        // if (output.inflight.layout_demand) |layout_demand| {
-        //     layout_demand.deinit();
-        //     output.inflight.layout_demand = null;
-        //     root.notifyLayoutDemandDone();
-        // }
-
-        //while (output.layouts.first) |node| node.data.destroy();
-
-        //server.input_manager.reconfigureDevices();
-
+        server.input_manager.reconfigureDevices();
     }
 
     pub fn activateOutput(root: *Root, output: *axiom_output.Output) void {
@@ -316,10 +302,9 @@ pub const Root = struct {
             }
         }
         std.debug.assert(root.transaction.fallback_state.focus_stack.empty());
-        //std.debug.assert(root.fallback_state.wm_stack.empty());
 
         // Enforce map-to-output configuration for the newly active output.
-        // server.input_manager.reconfigureDevices();
+        server.input_manager.reconfigureDevices();
     }
 
     fn processOutputConfig(
@@ -329,7 +314,6 @@ pub const Root = struct {
     ) void {
         // Ignore layout change events this function generates while applying the config
 
-        //const server = root.server;
         root.layout_change.link.remove();
         defer root.output_layout.events.change.add(&root.layout_change);
 

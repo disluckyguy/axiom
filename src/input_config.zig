@@ -244,6 +244,7 @@ pub const MapToOutput = struct {
 
             // These devices do not support being mapped to outputs.
             .keyboard, .@"switch" => {}, // .tablet_pad,
+            else => {},
         }
     }
 };

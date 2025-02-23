@@ -296,7 +296,7 @@ pub const View = struct {
         view.destroyPopups();
 
         // Moving windows with touch or tablet tool is not yet supported.
-        //if (seat.seat.validatePointerGrabSerial(null, event.serial)) {
+        //if (seat.wlr_seat.validatePointerGrabSerial(null, event.serial)) {
         switch (seat.cursor.current_mode) {
             .passthrough => seat.cursor.startMove(view),
             .move, .resize => {},
@@ -558,7 +558,12 @@ pub const View = struct {
     }
 
     pub fn setPendingOutput(view: *View, output: *axiom_output.Output) void {
+
+        // remove view from previous output
+        view.removeFromOutputList();
+
         view.pending.output = output;
+        output.views.append(view) catch std.log.err("failed to add to view list", .{});
         //view.pending_wm_stack_link.remove();
         view.pending_focus_stack_link.remove();
 
@@ -579,7 +584,20 @@ pub const View = struct {
         }
     }
 
-    pub fn close(view: View) void {
+    fn removeFromOutputList(view: *View) void {
+        std.debug.print("removing.. \n", .{});
+        if (view.pending.output) |prev_output| {
+            std.debug.print("output present", .{});
+            for (prev_output.views.items, 0..) |value, i| {
+                if (value == view) {
+                    std.debug.print("removed view \n", .{});
+                    _ = prev_output.views.swapRemove(i);
+                }
+            }
+        }
+    }
+
+    pub fn close(view: *View) void {
         switch (view.impl) {
             .toplevel => |toplevel| toplevel.wlr_toplevel.sendClose(),
             .xwayland_view => |xwayland_view| xwayland_view.xwayland_surface.close(),
@@ -758,6 +776,8 @@ pub const View = struct {
     /// Called by the impl when the surface will no longer be displayed
     pub fn unmap(view: *View) void {
         std.log.debug("view '{?s}' unmapped", .{view.getTitle()});
+
+        view.removeFromOutputList();
 
         if (!view.saved_surface_tree.node.enabled) view.saveSurfaceTree();
 

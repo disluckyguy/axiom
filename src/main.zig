@@ -7,10 +7,10 @@ const pixman = @import("pixman");
 
 const wlr = @import("wlroots");
 
-const axiom_server = @import("server.zig");
+const Server = @import("server.zig").Server;
 const gpa = @import("utils.zig").gpa;
 
-pub var server: axiom_server.Server = undefined;
+pub var server: Server = undefined;
 
 pub fn main() anyerror!void {
     wlr.log.init(.debug, null);

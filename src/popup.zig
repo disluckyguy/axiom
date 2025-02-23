@@ -20,9 +20,9 @@ pub const Popup = struct {
     scene_tree: *wlr.SceneTree,
     root_tree: *wlr.SceneTree,
 
-    commit: wl.Listener(*wlr.Surface) = wl.Listener(*wlr.Surface).init(commit),
-    destroy: wl.Listener(void) = wl.Listener(void).init(destroy),
-    reposition: wl.Listener(void) = wl.Listener(void).init(reposition),
+    commit: wl.Listener(*wlr.Surface) = wl.Listener(*wlr.Surface).init(handleCommit),
+    destroy: wl.Listener(void) = wl.Listener(void).init(handleDestroy),
+    reposition: wl.Listener(void) = wl.Listener(void).init(handleReposition),
 
     pub fn create(
         xdg_popup: *wlr.XdgPopup,
@@ -43,15 +43,15 @@ pub const Popup = struct {
         xdg_popup.events.reposition.add(&popup.reposition);
     }
 
-    pub fn commit(listener: *wl.Listener(*wlr.Surface), _: *wlr.Surface) void {
+    pub fn handleCommit(listener: *wl.Listener(*wlr.Surface), _: *wlr.Surface) void {
         const popup: *Popup = @fieldParentPtr("commit", listener);
         if (popup.xdg_popup.base.initial_commit) {
-            reposition(&popup.reposition);
+            handleReposition(&popup.reposition);
             _ = popup.xdg_popup.base.scheduleConfigure();
         }
     }
 
-    pub fn destroy(listener: *wl.Listener(void)) void {
+    pub fn handleDestroy(listener: *wl.Listener(void)) void {
         const popup: *Popup = @fieldParentPtr("destroy", listener);
 
         popup.commit.link.remove();
@@ -60,7 +60,7 @@ pub const Popup = struct {
         gpa.destroy(popup);
     }
 
-    fn reposition(listener: *wl.Listener(void)) void {
+    fn handleReposition(listener: *wl.Listener(void)) void {
         std.log.info("repositioning", .{});
         const popup: *Popup = @fieldParentPtr("reposition", listener);
         const node_data: *AxiomSceneNodeData = @ptrFromInt(popup.root_tree.node.data);

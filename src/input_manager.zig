@@ -4,19 +4,17 @@ const mem = std.mem;
 const wlr = @import("wlroots");
 const wl = @import("wayland").server.wl;
 
-const globber = @import("globber");
-
 const server = &@import("main.zig").server;
 const util = @import("utils.zig");
 
-const axiom_input_config = @import("input_config.zig");
-const axiom_input_device = @import("input_device.zig");
-const axiom_input_relay = @import("input_relay.zig");
+const InputConfig = @import("input_config.zig").InputConfig;
+const InputDevice = @import("input_device.zig").InputDevice;
+const InputRelay = @import("input_relay.zig");
 const Keyboard = @import("keyboard.zig");
-//const PointerConstraint = @import("PointerConstraint.zig");
-const axiom_seat = @import("seat.zig");
+const PointerConstraint = @import("pointer_constraint.zig").PointerConstraint;
+const Seat = @import("seat.zig").Seat;
 //const Switch = @import("Switch.zig");
-const axiom_text_input = @import("text_input.zig");
+const TextInput = @import("text_input.zig").TextInput;
 
 const default_seat_name = "default";
 
@@ -30,17 +28,17 @@ pub const InputManager = struct {
     // pointer_gestures: *wlr.PointerGesturesV1,
     virtual_pointer_manager: *wlr.VirtualPointerManagerV1,
     virtual_keyboard_manager: *wlr.VirtualKeyboardManagerV1,
-    //pointer_constraints: *wlr.PointerConstraintsV1,
+    pointer_constraints: *wlr.PointerConstraintsV1,
     input_method_manager: *wlr.InputMethodManagerV2,
     text_input_manager: *wlr.TextInputManagerV3,
     tablet_manager: *wlr.TabletManagerV2,
 
     /// List of input device configurations. Ordered by glob generality, with
     /// the most general towards the start and the most specific towards the end.
-    configs: std.ArrayList(axiom_input_config.InputConfig),
+    configs: std.ArrayList(InputConfig),
 
-    devices: wl.list.Head(axiom_input_device.InputDevice, .link),
-    seats: std.TailQueue(axiom_seat.Seat) = .{},
+    devices: wl.list.Head(InputDevice, .link),
+    seats: std.TailQueue(Seat) = .{},
 
     exclusive_client: ?*wl.Client = null,
 
@@ -48,15 +46,15 @@ pub const InputManager = struct {
         wl.Listener(*wlr.VirtualPointerManagerV1.event.NewPointer).init(handleNewVirtualPointer),
     new_virtual_keyboard: wl.Listener(*wlr.VirtualKeyboardV1) =
         wl.Listener(*wlr.VirtualKeyboardV1).init(handleNewVirtualKeyboard),
-    // new_constraint: wl.Listener(*wlr.PointerConstraintV1) =
-    //     wl.Listener(*wlr.PointerConstraintV1).init(handleNewConstraint),
+    new_constraint: wl.Listener(*wlr.PointerConstraintV1) =
+        wl.Listener(*wlr.PointerConstraintV1).init(handleNewConstraint),
     new_input_method: wl.Listener(*wlr.InputMethodV2) =
         wl.Listener(*wlr.InputMethodV2).init(handleNewInputMethod),
     new_text_input: wl.Listener(*wlr.TextInputV3) =
         wl.Listener(*wlr.TextInputV3).init(handleNewTextInput),
 
     pub fn init(input_manager: *InputManager) !void {
-        const seat_node = try util.gpa.create(std.TailQueue(axiom_seat.Seat).Node);
+        const seat_node = try util.gpa.create(std.TailQueue(Seat).Node);
         errdefer util.gpa.destroy(seat_node);
 
         input_manager.* = .{
@@ -66,11 +64,11 @@ pub const InputManager = struct {
             //.pointer_gestures = try wlr.PointerGesturesV1.create(server.wl_server),
             .virtual_pointer_manager = try wlr.VirtualPointerManagerV1.create(server.wl_server),
             .virtual_keyboard_manager = try wlr.VirtualKeyboardManagerV1.create(server.wl_server),
-            //.pointer_constraints = try wlr.PointerConstraintsV1.create(server.wl_server),
+            .pointer_constraints = try wlr.PointerConstraintsV1.create(server.wl_server),
             .input_method_manager = try wlr.InputMethodManagerV2.create(server.wl_server),
             .text_input_manager = try wlr.TextInputManagerV3.create(server.wl_server),
             .tablet_manager = try wlr.TabletManagerV2.create(server.wl_server),
-            .configs = std.ArrayList(axiom_input_config.InputConfig).init(util.gpa),
+            .configs = std.ArrayList(InputConfig).init(util.gpa),
 
             .devices = undefined,
         };
@@ -78,12 +76,12 @@ pub const InputManager = struct {
 
         input_manager.seats.prepend(seat_node);
         try seat_node.data.init(default_seat_name);
-        server.xwayland.setSeat(input_manager.defaultSeat().seat);
+        server.xwayland.setSeat(input_manager.defaultSeat().wlr_seat);
 
         server.backend.events.new_input.add(&input_manager.new_input);
         input_manager.virtual_pointer_manager.events.new_virtual_pointer.add(&input_manager.new_virtual_pointer);
         input_manager.virtual_keyboard_manager.events.new_virtual_keyboard.add(&input_manager.new_virtual_keyboard);
-        //input_manager.pointer_constraints.events.new_constraint.add(&input_manager.new_constraint);
+        input_manager.pointer_constraints.events.new_constraint.add(&input_manager.new_constraint);
         input_manager.input_method_manager.events.input_method.add(&input_manager.new_input_method);
         input_manager.text_input_manager.events.text_input.add(&input_manager.new_text_input);
     }
@@ -109,7 +107,7 @@ pub const InputManager = struct {
         input_manager.configs.deinit();
     }
 
-    pub fn defaultSeat(input_manager: InputManager) *axiom_seat.Seat {
+    pub fn defaultSeat(input_manager: InputManager) *Seat {
         return &input_manager.seats.first.?.data;
     }
 
@@ -127,9 +125,9 @@ pub const InputManager = struct {
         var it = input_manager.devices.iterator(.forward);
         while (it.next()) |device| {
             for (input_manager.configs.items) |config| {
-                if (globber.match(device.identifier, config.glob)) {
-                    config.apply(device);
-                }
+                //if (globber.match(device.identifier, config.glob)) {
+                config.apply(device);
+                //}
             }
         }
     }
@@ -161,30 +159,30 @@ pub const InputManager = struct {
         _: *wl.Listener(*wlr.VirtualKeyboardV1),
         virtual_keyboard: *wlr.VirtualKeyboardV1,
     ) void {
-        const seat: *axiom_seat.Seat = @ptrFromInt(virtual_keyboard.seat.data);
+        const seat: *Seat = @ptrFromInt(virtual_keyboard.seat.data);
         seat.addDevice(&virtual_keyboard.keyboard.base);
     }
 
-    // fn handleNewConstraint(
-    //     _: *wl.Listener(*wlr.PointerConstraintV1),
-    //     _: *wlr.PointerConstraintsV1, // wlr_constraint: *wlr.PointerConstraintV1,
-    // ) void {
-    // PointerConstraint.create(wlr_constraint) catch {
-    //     log.err("out of memory", .{});
-    //     wlr_constraint.resource.postNoMemory();
-    // };
-    //}
+    fn handleNewConstraint(
+        _: *wl.Listener(*wlr.PointerConstraintV1),
+        wlr_constraint: *wlr.PointerConstraintV1,
+    ) void {
+        PointerConstraint.create(wlr_constraint) catch {
+            log.err("out of memory", .{});
+            wlr_constraint.resource.postNoMemory();
+        };
+    }
 
     fn handleNewInputMethod(_: *wl.Listener(*wlr.InputMethodV2), input_method: *wlr.InputMethodV2) void {
-        const seat: *axiom_seat.Seat = @ptrFromInt(input_method.seat.data);
+        const seat: *Seat = @ptrFromInt(input_method.seat.data);
 
-        log.debug("new input method on seat {s}", .{seat.seat.name});
+        log.debug("new input method on seat {s}", .{seat.wlr_seat.name});
 
         seat.relay.newInputMethod(input_method);
     }
 
     fn handleNewTextInput(_: *wl.Listener(*wlr.TextInputV3), wlr_text_input: *wlr.TextInputV3) void {
-        axiom_text_input.TextInput.create(wlr_text_input) catch {
+        TextInput.create(wlr_text_input) catch {
             log.err("out of memory", .{});
             wlr_text_input.resource.postNoMemory();
             return;

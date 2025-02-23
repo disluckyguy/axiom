@@ -7,18 +7,17 @@ const math = std.math;
 //const pixman = @import("pixman");
 
 const wlr = @import("wlroots");
-const axiom_server = @import("server.zig");
-const axiom_view = @import("view.zig");
-const axiom_seat = @import("seat.zig");
-const AxiomSceneNodeData = @import("scene_node_data.zig").SceneNodeData;
-const AxiomData = @import("scene_node_data.zig").Data;
+const View = @import("view.zig").View;
+const Seat = @import("seat.zig").Seat;
+const SceneNodeData = @import("scene_node_data.zig").SceneNodeData;
+const SceneData = @import("scene_node_data.zig").SceneData;
 
 const gpa = @import("utils.zig").gpa;
 
 const server = &@import("main.zig").server;
 
 pub const XwaylandView = struct {
-    view: *axiom_view.View,
+    view: *View,
 
     xwayland_surface: *wlr.XwaylandSurface,
     /// Created on map and destroyed on unmap
@@ -50,7 +49,7 @@ pub const XwaylandView = struct {
         wl.Listener(*wlr.XwaylandSurface.event.Resize).init(handleRequestResize),
 
     pub fn create(xwayland_surface: *wlr.XwaylandSurface) error{OutOfMemory}!void {
-        const view = try axiom_view.View.create(.{ .xwayland_view = .{
+        const view = try View.create(.{ .xwayland_view = .{
             .view = undefined,
             .xwayland_surface = xwayland_surface,
         } });
@@ -317,7 +316,7 @@ pub const XwaylandView = struct {
     fn handleRequestMove(listener: *wl.Listener(void)) void {
         std.log.info("starting move", .{});
         const xwayland_view: *XwaylandView = @fieldParentPtr("request_move", listener);
-        const seat: *axiom_seat.Seat = @ptrFromInt(server.xwayland.seat.?.data);
+        const seat: *Seat = @ptrFromInt(server.xwayland.seat.?.data);
         const view = xwayland_view.view;
 
         view.move(seat);
@@ -421,7 +420,7 @@ pub const XwaylandOverrideRedirect = struct {
         const surface = override_redirect.xwayland_surface.surface.?;
         override_redirect.surface_tree =
             try server.root.interactive_layers.override_redirect.createSceneSubsurfaceTree(surface);
-        try AxiomSceneNodeData.attach(&override_redirect.surface_tree.?.node, .{
+        try SceneNodeData.attach(&override_redirect.surface_tree.?.node, .{
             .override_redirect = override_redirect,
         });
 
@@ -473,7 +472,7 @@ pub const XwaylandOverrideRedirect = struct {
         const seat = server.input_manager.defaultSeat();
         if (seat.focused == .view and seat.focused.view.impl == .xwayland_view and
             seat.focused.view.impl.xwayland_view.xwayland_surface.pid == override_redirect.xwayland_surface.pid and
-            seat.seat.keyboard_state.focused_surface == override_redirect.xwayland_surface.surface)
+            seat.wlr_seat.keyboard_state.focused_surface == override_redirect.xwayland_surface.surface)
         {
             seat.keyboardEnterOrLeave(seat.focused.view.rootSurface());
         }
