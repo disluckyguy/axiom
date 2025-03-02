@@ -17,7 +17,7 @@ const axiom_root = @import("root.zig");
 const axiom_view = @import("view.zig");
 const axiom_seat = @import("seat.zig");
 const axiom_input_manager = @import("input_manager.zig");
-const IpcSocket = @import("ipc/ipc.zig").IpcSocket;
+const IpcSocket = @import("ipc/server.zig").IpcSocket;
 const gpa = @import("utils.zig").gpa;
 
 pub const Server = struct {
@@ -33,13 +33,11 @@ pub const Server = struct {
     linux_dmabuf: ?*wlr.LinuxDmabufV1 = null,
     single_pixel_buffer_manager: *wlr.SinglePixelBufferManagerV1,
 
-    //seat: *axiom_seat.Seat,
     input_manager: *axiom_input_manager.InputManager,
-    //new_input: wl.Listener(*wlr.InputDevice) = wl.Listener(*wlr.InputDevice).init(newInput),
 
     xdg_shell: *wlr.XdgShell,
     new_xdg_toplevel: wl.Listener(*wlr.XdgToplevel) = wl.Listener(*wlr.XdgToplevel).init(newXdgToplevel),
-    views: wl.list.Head(axiom_view.View, .link) = undefined,
+    views: std.ArrayList(*axiom_view.View),
 
     xwayland: *wlr.Xwayland,
     xwayland_ready: wl.Listener(void) = wl.Listener(void).init(xwaylandReady),
@@ -86,11 +84,10 @@ pub const Server = struct {
             .xdg_shell = try wlr.XdgShell.create(wl_server, 2),
             .xwayland = undefined,
             .ipc_server = ipc_server,
+            .views = std.ArrayList(*axiom_view.View).init(gpa),
         };
 
         try server.root.init();
-
-        server.views.init();
 
         _ = try wlr.Subcompositor.create(server.wl_server);
         _ = try wlr.DataDeviceManager.create(server.wl_server);

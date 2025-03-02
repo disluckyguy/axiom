@@ -114,6 +114,7 @@ pub const ViewState = struct {
 };
 
 pub const View = struct {
+    id: u64,
     /// The implementation of this view
     impl: Impl,
 
@@ -189,8 +190,13 @@ pub const View = struct {
         const popup_tree = try server.root.transaction.hidden.tree.createSceneTree();
         errdefer popup_tree.node.destroy();
 
+        const id = view.generateRandomId() catch blk: {
+            break :blk 1;
+        };
+
         //const border_color = .{ 255, 0, 0, 0 };
         view.* = .{
+            .id = id,
             .impl = impl,
             .link = undefined,
             .tree = tree,
@@ -212,9 +218,7 @@ pub const View = struct {
 
         server.root.views.prepend(view);
         server.root.transaction.hidden.pending.focus_stack.prepend(view);
-        //server.root.transaction.hidden.pending.wm_stack.prepend(view);
         server.root.transaction.hidden.inflight.focus_stack.prepend(view);
-        //server.root.transaction.hidden.inflight.wm_stack.prepend(view);
 
         view.tree.node.setEnabled(false);
         view.popup_tree.node.setEnabled(false);
@@ -222,7 +226,9 @@ pub const View = struct {
         try AxiomSceneNodeData.attach(&view.tree.node, .{ .view = view });
         try AxiomSceneNodeData.attach(&view.popup_tree.node, .{ .view = view });
 
-        //server.seat.focus(view);
+        try server.views.append(view);
+        std.debug.print("length: {} \n", .{server.views.items.len});
+        std.debug.print("id: {} \n", .{view.id});
 
         return view;
     }
@@ -235,6 +241,14 @@ pub const View = struct {
         assert(!view.mapped);
 
         view.destroying = true;
+
+        {
+            for (server.views.items, 0..) |value, i| {
+                if (value.id == view.id) {
+                    _ = server.views.swapRemove(i);
+                }
+            }
+        }
 
         // If there are still saved buffers, then this view needs to be kept
         // around until the current transaction completes. This function will be
@@ -597,6 +611,33 @@ pub const View = struct {
         }
     }
 
+    fn generateRandomId(_: *View) !u64 {
+        var prng = std.rand.DefaultPrng.init(blk: {
+            var seed: u64 = undefined;
+            try std.posix.getrandom(std.mem.asBytes(&seed));
+            break :blk seed;
+        });
+        const rand = prng.random();
+
+        var redo = true;
+
+        while (redo) {
+            redo = false;
+            const id = rand.int(u32);
+            for (server.views.items) |value| {
+                if (value.id == id) {
+                    redo = true;
+                }
+            }
+
+            if (!redo) {
+                return id;
+            }
+        }
+
+        return 1;
+    }
+
     pub fn close(view: *View) void {
         switch (view.impl) {
             .toplevel => |toplevel| toplevel.wlr_toplevel.sendClose(),
@@ -655,76 +696,12 @@ pub const View = struct {
         box.height = math.clamp(box.height, view.constraints.min_height, view.constraints.max_height);
     }
 
-    /// Attach after n visible, not-floating views in the pending wm_stack
-    // pub fn attachAfter(view: *View, output_pending: *axiom_output.PendingState, n: usize) void {
-    //     var visible: u32 = 0;
-    //     var it = output_pending.wm_stack.iterator(.forward);
-
-    //     while (it.next()) |other| {
-    //         if (visible >= n) break;
-    //         if (!other.pending.float and other.pending.tags & output_pending.tags != 0) {
-    //             visible += 1;
-    //         }
-    //     }
-
-    //     it.current.prev.?.insert(&view.pending_wm_stack_link);
-    // }
-
-    /// Attach above or below the currently focused view
-    // pub fn attachRelative(view: *View, output_pending: *axiom_output.PendingState, mode: AttachRelativeMode) void {
-    //     const focus_stack_head = output_pending.focus_stack.first() orelse {
-    //         output_pending.wm_stack.append(view);
-    //         return;
-    //     };
-
-    //     // There are two cases to consider here:
-    //     //
-    //     // 1. The first view in the focus stack is visible given the currently focused tags.
-    //     // In this case, inserting directly before/after that view in the wm_stack is correct.
-    //     //
-    //     // 2. There are no views visible given the currently focused tags. In this case it
-    //     // doesn't matter where in the wm_stack the new view is inserted as it will be the only
-    //     // view visible.
-
-    //     var it = output_pending.wm_stack.iterator(.forward);
-    //     while (it.next()) |other| {
-    //         if (other == focus_stack_head) {
-    //             switch (mode) {
-    //                 .above => other.pending_wm_stack_link.prev.?.insert(&view.pending_wm_stack_link),
-    //                 .below => other.pending_wm_stack_link.insert(&view.pending_wm_stack_link),
-    //             }
-    //             return;
-    //         }
-    //     }
-    // }
-
     /// Called by the impl when the surface is ready to be displayed
     pub fn map(view: *View) !void {
         std.log.debug("view '{?s}' mapped", .{view.getTitle()});
 
         assert(!view.mapped and !view.destroying);
         view.mapped = true;
-
-        //view.foreign_toplevel_handle.map();
-
-        // if (server.config.rules.float.match(view)) |float| {
-        //     view.pending.float = float;
-        // }
-        // if (server.config.rules.fullscreen.match(view)) |fullscreen| {
-        //     view.pending.fullscreen = fullscreen;
-        // }
-        // if (server.config.rules.ssd.match(view)) |ssd| {
-        //     view.pending.ssd = ssd;
-        // }
-
-        // if (server.config.rules.tearing.match(view)) |tearing| {
-        //     view.tearing_mode = if (tearing) .tearing else .no_tearing;
-        // }
-
-        // if (server.config.rules.dimensions.match(view)) |dimensions| {
-        //     view.pending.box.width = dimensions.width;
-        //     view.pending.box.height = dimensions.height;
-        // }
 
         const output = server.input_manager.defaultSeat().focused_output;
 

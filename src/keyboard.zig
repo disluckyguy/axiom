@@ -97,8 +97,6 @@ pub const Keyboard = struct {
 
         var handled = false;
 
-        std.debug.print("modifiers {} \n", .{wlr_keyboard.getModifiers()});
-
         if (wlr_keyboard.getModifiers().logo and event.state == .pressed) {
             for (wlr_keyboard.xkb_state.?.keyGetSyms(keycode)) |sym| {
                 if (keyboard.seat.handleKeybind(sym)) {
